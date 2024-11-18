@@ -40,5 +40,5 @@ This project applies transformer models to predict the motion of a masked defens
 
 ## Acknowledgments
 
-[1^]: NFL Big Data Bowl for providing the dataset.
-[2^]: Transformer model architecture inspired by the original paper by Vaswani et al., *Attention is All You Need*.
+1. NFL Big Data Bowl for providing the dataset.
+2. Transformer model architecture inspired by the original paper by Vaswani et al., *Attention is All You Need*.
