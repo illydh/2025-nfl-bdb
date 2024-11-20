@@ -12,14 +12,14 @@ This project applies transformer models to predict the motion of a masked defens
 ## Approach
 
 1. Preprocess the data:
-    - Normalize player positions relative to play direction.
-    - Mask the target defensive player's motion data.
-    - Create sequences of player movements over time.
+  - Normalize player positions relative to play direction.
+  - Mask the target defensive player's motion data.
+  - Create sequences of player movements over time.
 2. Train a transformer model:
-    - Inputs: Player features as sequences with positional encodings.
-    - Outputs: Predicted x, y coordinates of the masked player.
+  - Inputs: Player features as sequences with positional encodings.
+  - Outputs: Predicted x, y coordinates of the masked player.
 3. Evaluate performance:
-    - Metrics: Mean Squared Error (MSE) for position prediction.
+  - Metrics: Mean Squared Error (MSE) for position prediction.
 
 ## How to Run
 1. **Download the dataset** from [Kaggle NFL Big Data Bowl](https://www.kaggle.com/competitions/nfl-big-data-bowl-2025/data).
@@ -33,7 +33,7 @@ This project applies transformer models to predict the motion of a masked defens
     unzip path/to/file/nfl-big-data-bowl-2025.zip'
     ```
     *Note: `kaggle.json` is a API token created from Kaggle creator accounts and is necessary to access Kaggle commands. Directions to downloading one can be found [here](https://www.kaggle.com/docs/api).*
-2. Place the dataset in the same directory that this repository is cloned in.
+2. Place the dataset and the script files into the same directory that this repository is cloned in.
 3. Preprocess the data and train the model.
 4. Evaluate the model.
 
