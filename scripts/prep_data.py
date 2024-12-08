@@ -23,9 +23,13 @@ from pathlib import Path
 
 import polars as pl
 
+import random
+
 # TEMPORARY CHANGE
 INPUT_DATA_DIR = Path("./")
 OUT_DIR = Path("./bdb-2025/split_prepped_data/")
+
+OUT_DIR.mkdir(parents=True, exist_ok=True)  # Create directory if it doesn't exist
 
 
 def get_players_df() -> pl.DataFrame:
@@ -36,15 +40,21 @@ def get_players_df() -> pl.DataFrame:
         pl.DataFrame: Preprocessed player data with additional features.
     """
     return (
-        pl.read_csv(INPUT_DATA_DIR / "players.csv", null_values=["NA", "nan", "N/A", "NaN", ""])
+        pl.read_csv(
+            INPUT_DATA_DIR / "players.csv", null_values=["NA", "nan", "N/A", "NaN", ""]
+        )
         .with_columns(
             height_inches=(
-                pl.col("height").str.split("-").map_elements(lambda s: int(s[0]) * 12 + int(s[1]), return_dtype=int)
+                pl.col("height")
+                .str.split("-")
+                .map_elements(lambda s: int(s[0]) * 12 + int(s[1]), return_dtype=int)
             )
         )
         .with_columns(
-            weight_Z=(pl.col("weight") - pl.col("weight").mean()) / pl.col("weight").std(),
-            height_Z=(pl.col("height_inches") - pl.col("height_inches").mean()) / pl.col("height_inches").std(),
+            weight_Z=(pl.col("weight") - pl.col("weight").mean())
+            / pl.col("weight").std(),
+            height_Z=(pl.col("height_inches") - pl.col("height_inches").mean())
+            / pl.col("height_inches").std(),
         )
     )
 
@@ -56,7 +66,9 @@ def get_plays_df() -> pl.DataFrame:
     Returns:
         pl.DataFrame: Preprocessed play data with additional features.
     """
-    return pl.read_csv(INPUT_DATA_DIR / "plays.csv", null_values=["NA", "nan", "N/A", "NaN", ""]).with_columns(
+    return pl.read_csv(
+        INPUT_DATA_DIR / "plays.csv", null_values=["NA", "nan", "N/A", "NaN", ""]
+    ).with_columns(
         distanceToGoal=(
             pl.when(pl.col("possessionTeam") == pl.col("yardlineSide"))
             .then(100 - pl.col("yardlineNumber"))
@@ -72,11 +84,12 @@ def get_tracking_df() -> pl.DataFrame:
     Returns:
         pl.DataFrame: Preprocessed tracking data with additional features.
     """
-    # don't include football rows for this project.  
+    # don't include football rows for this project.
     # NOTE: Only processing week 1 for the sake of time.  Change "1" to "*" to process all weeks
-    return pl.read_csv(INPUT_DATA_DIR / "tracking_week_1.csv", null_values=["NA", "nan", "N/A", "NaN", ""]).filter(
-        pl.col("displayName") != "football"
-    )
+    return pl.read_csv(
+        INPUT_DATA_DIR / "tracking_week_1.csv",
+        null_values=["NA", "nan", "N/A", "NaN", ""],
+    ).filter(pl.col("displayName") != "football")
 
 
 def add_features_to_tracking_df(
@@ -109,20 +122,21 @@ def add_features_to_tracking_df(
             on=["gameId", "playId"],
             how="inner",
         )
-        #.join(
+        # .join(
         #    players_df.select(["nflId", "weight_Z", "height_Z"]).unique(),
         #    on="nflId",
         #    how="inner",
-        #)
+        # )
         .with_columns(
             side=pl.when(pl.col("club") == pl.col("possessionTeam"))
             .then(pl.lit(1))
             .otherwise(pl.lit(-1))
             .alias("side"),
-        )
-        .drop(["possessionTeam"])
+        ).drop(["possessionTeam"])
     )
-    assert len(tracking_df) == og_len, "Lost rows when joining tracking data with play/player data"
+    assert (
+        len(tracking_df) == og_len
+    ), "Lost rows when joining tracking data with play/player data"
 
     return tracking_df
 
@@ -152,8 +166,6 @@ def convert_tracking_to_cartesian(tracking_df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-import random
-
 def get_masked_players(tracking_df):
     """
     Randomly selects a player from a game and play, and filters their data from each frame.
@@ -170,12 +182,14 @@ def get_masked_players(tracking_df):
 
         # The defensive players in a given game + play
         filtered_df = tracking_df.filter(
-          (pl.col("gameId") == game_id) 
-          & (pl.col("playId") == play_id) 
-          & (pl.col("frameId") == 1)
-          & (pl.col("isDefense") == 1)
+            (pl.col("gameId") == game_id)
+            & (pl.col("playId") == play_id)
+            & (pl.col("frameId") == 1)
+            & (pl.col("isDefense") == 1)
         )
-        assert len(filtered_df) == 11, "No players found for gameId: {}, playId: {}".format(game_id, play_id)
+        assert (
+            len(filtered_df) == 11
+        ), "No players found for gameId: {}, playId: {}".format(game_id, play_id)
 
         # Retrieve masked player
         selected_player = random.choice(filtered_df["displayName"].to_list())
@@ -195,7 +209,6 @@ def get_masked_players(tracking_df):
                 & (pl.col("displayName") == selected_player)
             )
         )
-        #assert len(tracking_df) - len(masked_player_df) == len(filtered_df), "Players other than the masked player were lost"
         print(f"Player masked for gameId {game_id} playId {play_id}")
 
     return filtered_df, masked_player_df
@@ -203,7 +216,10 @@ def get_masked_players(tracking_df):
 
 # Provided from SportsTransformers-utils
 
-def split_train_test_val(tracking_df: pl.DataFrame, target_df: pl.DataFrame) -> dict[str, pl.DataFrame]:
+
+def split_train_test_val(
+    tracking_df: pl.DataFrame, target_df: pl.DataFrame
+) -> dict[str, pl.DataFrame]:
     """
     Split data into train, validation, and test sets.
     Split is 70-15-15 for train-test-val respectively. Notably, we split at the play levle and not frame level.
@@ -224,8 +240,14 @@ def split_train_test_val(tracking_df: pl.DataFrame, target_df: pl.DataFrame) -> 
         f"{tracking_df.n_unique(['gameId', 'playId', 'frameId'])} frames",
     )
 
-    test_val_ids = tracking_df.select(["gameId", "playId"]).unique(maintain_order=True).sample(fraction=0.3, seed=42)
-    train_tracking_df = tracking_df.join(test_val_ids, on=["gameId", "playId"], how="anti")
+    test_val_ids = (
+        tracking_df.select(["gameId", "playId"])
+        .unique(maintain_order=True)
+        .sample(fraction=0.3, seed=42)
+    )
+    train_tracking_df = tracking_df.join(
+        test_val_ids, on=["gameId", "playId"], how="anti"
+    )
     train_tgt_df = target_df.join(test_val_ids, on=["gameId", "playId"], how="anti")
     print(
         f"Train set: {train_tracking_df.n_unique(['gameId', 'playId'])} plays,",
@@ -256,7 +278,6 @@ def split_train_test_val(tracking_df: pl.DataFrame, target_df: pl.DataFrame) -> 
         "val_features": val_tracking_df,
         "val_targets": val_tgt_df,
     }
-
 
 
 def main():
