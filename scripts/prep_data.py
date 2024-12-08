@@ -12,10 +12,7 @@ Functions:
     get_tracking_df: Load and preprocess tracking data
     add_features_to_tracking_df: Add derived features to tracking data
     convert_tracking_to_cartesian: Convert polar coordinates to Cartesian
-    standardize_tracking_directions: Standardize play directions
-    augment_mirror_tracking: Augment data by mirroring the field
-    add_relative_positions: Add relative position features
-    offenseFormation_df: Generate target dataframe offenseFormation prediction
+    get_masked_players: Generate target dataframe maskedPlayers prediction
     split_train_test_val: Split data into train, validation, and test sets
     main: Main execution function
 
@@ -28,7 +25,7 @@ import polars as pl
 
 # TEMPORARY CHANGE
 INPUT_DATA_DIR = Path("./")
-OUT_DIR = Path("./split_prepped_data/")
+OUT_DIR = Path("./bdb-2025/split_prepped_data/")
 
 
 def get_players_df() -> pl.DataFrame:
@@ -155,88 +152,56 @@ def convert_tracking_to_cartesian(tracking_df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def standardize_tracking_directions(tracking_df: pl.DataFrame) -> pl.DataFrame:
+import random
+
+def get_masked_players(tracking_df):
     """
-    Standardize play directions to always moving left to right.
+    Randomly selects a player from a game and play, and filters their data from each frame.
 
     Args:
-        tracking_df (pl.DataFrame): Tracking data
+        tracking_df: The tracking DataFrame.
 
     Returns:
-        pl.DataFrame: Tracking data with standardized directions.
+        tuple: A tuple containing the filtered tracking DataFrame and the masked players DataFrame.
     """
-    return tracking_df.with_columns(
-        x=pl.when(pl.col("playDirection") == "right").then(pl.col("x")).otherwise(120 - pl.col("x")),
-        y=pl.when(pl.col("playDirection") == "right").then(pl.col("y")).otherwise(53.3 - pl.col("y")),
-        vx=pl.when(pl.col("playDirection") == "right").then(pl.col("vx")).otherwise(-1 * pl.col("vx")),
-        vy=pl.when(pl.col("playDirection") == "right").then(pl.col("vy")).otherwise(-1 * pl.col("vy")),
-        ox=pl.when(pl.col("playDirection") == "right").then(pl.col("ox")).otherwise(-1 * pl.col("ox")),
-        oy=pl.when(pl.col("playDirection") == "right").then(pl.col("oy")).otherwise(-1 * pl.col("oy")),
-    ).drop("playDirection")
+    masked_players_df = pl.DataFrame()
+
+    for game_id, play_id in tracking_df.select(["gameId", "playId"]).unique().rows():
+
+        # The defensive players in a given game + play
+        filtered_df = tracking_df.filter(
+          (pl.col("gameId") == game_id) 
+          & (pl.col("playId") == play_id) 
+          & (pl.col("frameId") == 1)
+          & (pl.col("isDefense") == 1)
+        )
+        assert len(filtered_df) == 11, "No players found for gameId: {}, playId: {}".format(game_id, play_id)
+
+        # Retrieve masked player
+        selected_player = random.choice(filtered_df["displayName"].to_list())
+
+        masked_player_df = tracking_df.filter(
+            (pl.col("gameId") == game_id)
+            & (pl.col("playId") == play_id)
+            & (pl.col("displayName") == selected_player)
+        )
+        masked_players_df = pl.concat([masked_players_df, masked_player_df])
+
+        # Filter out the selected player from tracking_df
+        filtered_df = tracking_df.filter(
+            ~(
+                (pl.col("gameId") == game_id)
+                & (pl.col("playId") == play_id)
+                & (pl.col("displayName") == selected_player)
+            )
+        )
+        #assert len(tracking_df) - len(masked_player_df) == len(filtered_df), "Players other than the masked player were lost"
+        print(f"Player masked for gameId {game_id} playId {play_id}")
+
+    return filtered_df, masked_player_df
 
 
-def augment_mirror_tracking(tracking_df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Augment data by mirroring the field assuming all plays are moving right.
-    There are arguments to not do this as football isn't perfectly symmetric (e.g. most QBs are right-handed) but
-    offenseFormation is mostly symmetrical and for the sake of this demo I think more data is more important.
-
-    Args:
-        tracking_df (pl.DataFrame): Tracking data
-
-    Returns:
-        pl.DataFrame: Augmented tracking data.
-    """
-    og_len = len(tracking_df)
-
-    mirrored_tracking_df = tracking_df.clone().with_columns(
-        # only flip y values
-        y=53.3 - pl.col("y"),
-        vy=-1 * pl.col("vy"),
-        oy=-1 * pl.col("oy"),
-        mirrored=pl.lit(True),
-    )
-
-    tracking_df = pl.concat(
-        [
-            tracking_df.with_columns(mirrored=pl.lit(False)),
-            mirrored_tracking_df,
-        ],
-        how="vertical",
-    )
-
-    assert len(tracking_df) == og_len * 2, "Lost rows when mirroring tracking data"
-    return tracking_df
-
-
-def get_offenseFormation(tracking_df: pl.DataFrame, plays_df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Generate target dataframe for offenseFormation prediction.
-
-    Args:
-        tracking_df (pl.DataFrame): Tracking data
-
-    Returns:
-        tuple: tuple containing offenseFormation coverage
-    """
-    
-    # drop rows where offenseFormation is None
-    plays_df = plays_df.filter(pl.col("offenseFormation").is_not_null())
-    
-    tracking_df = tracking_df.join(
-        plays_df[["gameId", "playId", "offenseFormation"]],
-        on=["gameId", "playId"],
-        how="inner",
-    )
-    
-    offenseFormation_df = (tracking_df[["gameId", "playId", "mirrored", "frameId", "offenseFormation"]]
-       .unique()  # Polars equivalent of drop_duplicates()
-    )
-
-    tracking_df = tracking_df.drop(["offenseFormation"])
-    
-    return offenseFormation_df, tracking_df
-    
+# Provided from SportsTransformers-utils
 
 def split_train_test_val(tracking_df: pl.DataFrame, target_df: pl.DataFrame) -> dict[str, pl.DataFrame]:
     """
@@ -251,36 +216,36 @@ def split_train_test_val(tracking_df: pl.DataFrame, target_df: pl.DataFrame) -> 
     Returns:
         dict: Dictionary containing train, validation, and test dataframes.
     """
-    tracking_df = tracking_df.sort(["gameId", "playId", "mirrored", "frameId"])
-    target_df = target_df.sort(["gameId", "playId", "mirrored"])
+    tracking_df = tracking_df.sort(["gameId", "playId", "frameId"])
+    target_df = target_df.sort(["gameId", "playId"])
 
     print(
-        f"Total set: {tracking_df.n_unique(['gameId', 'playId', 'mirrored'])} plays,",
-        f"{tracking_df.n_unique(['gameId', 'playId', 'mirrored', 'frameId'])} frames",
+        f"Total set: {tracking_df.n_unique(['gameId', 'playId'])} plays,",
+        f"{tracking_df.n_unique(['gameId', 'playId', 'frameId'])} frames",
     )
 
     test_val_ids = tracking_df.select(["gameId", "playId"]).unique(maintain_order=True).sample(fraction=0.3, seed=42)
     train_tracking_df = tracking_df.join(test_val_ids, on=["gameId", "playId"], how="anti")
     train_tgt_df = target_df.join(test_val_ids, on=["gameId", "playId"], how="anti")
     print(
-        f"Train set: {train_tracking_df.n_unique(['gameId', 'playId', 'mirrored'])} plays,",
-        f"{train_tracking_df.n_unique(['gameId', 'playId', 'mirrored', 'frameId'])} frames",
+        f"Train set: {train_tracking_df.n_unique(['gameId', 'playId'])} plays,",
+        f"{train_tracking_df.n_unique(['gameId', 'playId', 'frameId'])} frames",
     )
 
     test_ids = test_val_ids.sample(fraction=0.5, seed=42)  # 70-15-15 split
     test_tracking_df = tracking_df.join(test_ids, on=["gameId", "playId"], how="inner")
     test_tgt_df = target_df.join(test_ids, on=["gameId", "playId"], how="inner")
     print(
-        f"Test set: {test_tracking_df.n_unique(['gameId', 'playId', 'mirrored'])} plays,",
-        f"{test_tracking_df.n_unique(['gameId', 'playId', 'mirrored', 'frameId'])} frames",
+        f"Test set: {test_tracking_df.n_unique(['gameId', 'playId'])} plays,",
+        f"{test_tracking_df.n_unique(['gameId', 'playId', 'frameId'])} frames",
     )
 
     val_ids = test_val_ids.join(test_ids, on=["gameId", "playId"], how="anti")
     val_tracking_df = tracking_df.join(val_ids, on=["gameId", "playId"], how="inner")
     val_tgt_df = target_df.join(val_ids, on=["gameId", "playId"], how="inner")
     print(
-        f"Validation set: {val_tracking_df.n_unique(['gameId', 'playId', 'mirrored'])} plays,",
-        f"{val_tracking_df.n_unique(['gameId', 'playId', 'mirrored', 'frameId'])} frames",
+        f"Validation set: {val_tracking_df.n_unique(['gameId', 'playId'])} plays,",
+        f"{val_tracking_df.n_unique(['gameId', 'playId','frameId'])} frames",
     )
 
     return {
@@ -318,22 +283,19 @@ def main():
     del players_df
     print("Convert tracking to cartesian")
     tracking_df = convert_tracking_to_cartesian(tracking_df)
-    print("Standardize play direction")
-    tracking_df = standardize_tracking_directions(tracking_df)
-    print("Augment data by mirroring")
-    tracking_df = augment_mirror_tracking(tracking_df)
 
-    print("Generate target - offenseFormation")
-    offenseFormation_df, rel_tracking_df = get_offenseFormation(tracking_df, plays_df)
+    print("Generate target - maskedPlayers")
+    rel_tracking_df, maskedPlayers_df = get_masked_players(tracking_df)
 
+    # Writing out splits to OUT_DIR
     print("Split train/test/val")
-    split_dfs = split_train_test_val(rel_tracking_df, offenseFormation_df)
+    split_dfs = split_train_test_val(rel_tracking_df, maskedPlayers_df)
 
     out_dir = Path(OUT_DIR)
     out_dir.mkdir(exist_ok=True, parents=True)
 
     for key, df in split_dfs.items():
-        sort_keys = ["gameId", "playId", "mirrored", "frameId"]
+        sort_keys = ["gameId", "playId", "frameId"]
         df.sort(sort_keys).write_parquet(out_dir / f"{key}.parquet")
 
 
