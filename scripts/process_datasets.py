@@ -26,18 +26,8 @@ import polars as pl
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-PREPPED_DATA_DIR = Path("/kaggle/working/split_prepped_data/")
-DATASET_DIR = Path("/kaggle/working/datasets/")
-
-FORMATION_ENUM = {
-    "EMPTY": 0,
-    "I_FORM": 1,
-    "JUMBO": 2,
-    "PISTOL": 3,
-    "SHOTGUN": 4,
-    "SINGLEBACK": 5,
-    "WILDCAT": 6,
-}
+PREPPED_DATA_DIR = Path("./bdb-2025/split_prepped_data/")
+DATASET_DIR = Path("./bdb-2025/working/datasets/")
 
 
 class BDB2025_Dataset(Dataset):
@@ -76,17 +66,19 @@ class BDB2025_Dataset(Dataset):
             raise ValueError("model_type must be 'transformer'")
 
         self.model_type = model_type
-        self.keys = list(feature_df.select(["gameId", "playId", "mirrored", "frameId"]).unique().rows())
+        self.keys = list(
+            feature_df.select(["gameId", "playId", "frameId"]).unique().rows()
+        )
 
         # Convert to pandas form with index for quick row retrieval
         self.feature_df_partition = (
             feature_df.to_pandas(use_pyarrow_extension_array=True)
-            .set_index(["gameId", "playId", "mirrored", "frameId", "nflId"])
+            .set_index(["gameId", "playId", "frameId", "nflId"])
             .sort_index()
         )
         self.tgt_df_partition = (
             tgt_df.to_pandas(use_pyarrow_extension_array=True)
-            .set_index(["gameId", "playId", "mirrored", "frameId"])
+            .set_index(["gameId", "playId", "frameId"])
             .sort_index()
         )
 
@@ -96,7 +88,11 @@ class BDB2025_Dataset(Dataset):
         with mp.Pool(processes=min(8, mp.cpu_count())) as pool:
             results = pool.map(
                 self.process_key,
-                tqdm(self.keys, desc="Pre-computing feature transforms", total=len(self.keys)),
+                tqdm(
+                    self.keys,
+                    desc="Pre-computing feature transforms",
+                    total=len(self.keys),
+                ),
             )
             # Unpack results
             for key, tgt_array, feature_array in results:
@@ -114,7 +110,9 @@ class BDB2025_Dataset(Dataset):
             tuple[tuple, np.ndarray, np.ndarray]: Processed key, target array, and feature array
         """
         tgt_array = self.transform_target_df(self.tgt_df_partition.loc[key])
-        feature_array = self.transform_input_frame_df(self.feature_df_partition.loc[key])
+        feature_array = self.transform_input_frame_df(
+            self.feature_df_partition.loc[key]
+        )
         return key, tgt_array, feature_array
 
     def __len__(self) -> int:
@@ -162,28 +160,42 @@ class BDB2025_Dataset(Dataset):
 
     def transform_target_df(self, tgt_df: pd.DataFrame) -> np.ndarray:
         """
-        Transform target DataFrame to numpy array.
+        Transforms the target dataframe into a NumPy array containing the missing player's information.
+
         Args:
-            tgt_df (pd.DataFrame): Target DataFrame 
+            tgt_df (pd.DataFrame): Target dataframe with missing player data.
+
         Returns:
-            np.ndarray: Transformed target values as one-hot encoded array
+            np.ndarray: Array with each row containing the missing player's display name (as index)
+                        and their x-y coordinates.
         """
-        # Create one-hot encoding with prefix
-        y = pd.get_dummies(tgt_df['offenseFormation'], prefix='formation')
+        # Check if tgt_df is a Series and convert to DataFrame if necessary
+        if isinstance(tgt_df, pd.Series):
+            tgt_df = tgt_df.to_frame().T  # Convert Series to DataFrame
 
-        # Ensure all formation types are present
-        expected_columns = [f"formation_{formation}" for formation in sorted(FORMATION_ENUM.keys())]
-        for col in expected_columns:
-            if col not in y.columns:
-                y[col] = 0
+        # Check required columns
+        required_columns = ["displayName", "x", "y"]
+        missing_columns = [col for col in required_columns if col not in tgt_df.columns]
+        if missing_columns:
+            # Instead of raising an error, print a warning and return an empty array
+            print(
+                f"Warning: Target dataframe is missing columns: {missing_columns} for key {tgt_df.index[0]}"
+            )
+            raise ValueError(
+                f"Target dataframe must contain columns: {required_columns}"
+            )
 
-        # Sort columns
-        y = y[expected_columns]
-        y = y.to_numpy()[0].astype(np.float32)
+        # Select relevant columns
+        transformed_df = tgt_df[["displayName", "x", "y"]]
+
+        # Convert to NumPy array
+        y = transformed_df.to_numpy()
 
         return y
 
-    def transformer_transform_input_frame_df(self, frame_df: pd.DataFrame) -> np.ndarray:
+    def transformer_transform_input_frame_df(
+        self, frame_df: pd.DataFrame
+    ) -> np.ndarray:
         """
         Transform input frame DataFrame for transformer model.
 
@@ -196,9 +208,12 @@ class BDB2025_Dataset(Dataset):
         Raises:
             AssertionError: If the output shape is not as expected
         """
-        features = ["x", "y", "vx", "vy", "side"]
+        features = ["x", "y"]
         x = frame_df[features].to_numpy(dtype=np.float32)
-        assert x.shape == (22, len(features)), f"Expected shape (22, {len(features)}), got {x.shape}"
+        assert x.shape == (
+            21,
+            len(features),
+        ), f"Expected shape (21, {len(features)}), got {x.shape}"
         return x
 
 
