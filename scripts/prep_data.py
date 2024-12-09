@@ -176,10 +176,10 @@ def get_masked_players(tracking_df):
     Returns:
         tuple: A tuple containing the filtered tracking DataFrame and the masked players DataFrame.
     """
-    masked_players_df = pl.DataFrame()
+    masked_players_df = pl.DataFrame(schema=tracking_df.schema)
+    rel_tracking_df = tracking_df
 
     for game_id, play_id in tracking_df.select(["gameId", "playId"]).unique().rows():
-
         # The defensive players in a given game + play
         filtered_df = tracking_df.filter(
             (pl.col("gameId") == game_id)
@@ -193,25 +193,27 @@ def get_masked_players(tracking_df):
 
         # Retrieve masked player
         selected_player = random.choice(filtered_df["displayName"].to_list())
-
         masked_player_df = tracking_df.filter(
             (pl.col("gameId") == game_id)
             & (pl.col("playId") == play_id)
             & (pl.col("displayName") == selected_player)
         )
-        masked_players_df = pl.concat([masked_players_df, masked_player_df])
+        masked_players_df = pl.concat(
+            [masked_players_df, masked_player_df], how="vertical"
+        )
 
         # Filter out the selected player from tracking_df
-        filtered_df = tracking_df.filter(
+        rel_tracking_df = rel_tracking_df.filter(
             ~(
                 (pl.col("gameId") == game_id)
                 & (pl.col("playId") == play_id)
                 & (pl.col("displayName") == selected_player)
             )
         )
+
         print(f"Player masked for gameId {game_id} playId {play_id}")
 
-    return filtered_df, masked_player_df
+    return rel_tracking_df, masked_players_df
 
 
 # Provided from SportsTransformers-utils
