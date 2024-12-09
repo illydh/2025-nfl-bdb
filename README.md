@@ -1,4 +1,4 @@
-# Predicting Motion of a Masked Defensive Player Using Transformers
+# Using Transformers to Predict Motion of Masked Player 
 
 ## Overview
 
