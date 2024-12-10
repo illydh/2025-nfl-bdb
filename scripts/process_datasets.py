@@ -26,8 +26,8 @@ import polars as pl
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-PREPPED_DATA_DIR = Path("./bdb-2025/split_prepped_data/")
-DATASET_DIR = Path("./bdb-2025/working/datasets/")
+PREPPED_DATA_DIR = Path("./drive/My Drive/bdb-2025/split_prepped_data/")
+DATASET_DIR = Path("./drive/My Drive/bdb-2025/working/datasets/")
 
 
 class BDB2025_Dataset(Dataset):
