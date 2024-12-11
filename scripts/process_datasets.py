@@ -29,6 +29,20 @@ from tqdm import tqdm
 PREPPED_DATA_DIR = Path("./drive/My Drive/bdb-2025/split_prepped_data/")
 DATASET_DIR = Path("./drive/My Drive/bdb-2025/working/datasets/")
 
+# Enumerate player positions
+POSITIONS_ENUM = {
+    "LB": 0,
+    "SS": 1,
+    "NT": 2,
+    "MLB": 3,
+    "DT": 4,
+    "CB": 5,
+    "DE": 6,
+    "ILB": 7,
+    "FS": 8,
+    "OLB": 9,
+}
+
 
 class BDB2025_Dataset(Dataset):
     """
@@ -160,36 +174,26 @@ class BDB2025_Dataset(Dataset):
 
     def transform_target_df(self, tgt_df: pd.DataFrame) -> np.ndarray:
         """
-        Transforms the target dataframe into a NumPy array containing the missing player's information.
-
+        Transform target DataFrame to numpy array.
         Args:
-            tgt_df (pd.DataFrame): Target dataframe with missing player data.
-
+            tgt_df (pd.DataFrame): Target DataFrame
         Returns:
-            np.ndarray: Array with each row containing the missing player's display name (as index)
-                        and their x-y coordinates.
+            np.ndarray: Transformed target values as one-hot encoded array
         """
-        # Check if tgt_df is a Series and convert to DataFrame if necessary
-        if isinstance(tgt_df, pd.Series):
-            tgt_df = tgt_df.to_frame().T  # Convert Series to DataFrame
+        # Create one-hot encoding with prefix
+        y = pd.get_dummies(tgt_df["position"], prefix="position")
 
-        # Check required columns
-        required_columns = ["displayName", "x", "y"]
-        missing_columns = [col for col in required_columns if col not in tgt_df.columns]
-        if missing_columns:
-            # Instead of raising an error, print a warning and return an empty array
-            print(
-                f"Warning: Target dataframe is missing columns: {missing_columns} for key {tgt_df.index[0]}"
-            )
-            raise ValueError(
-                f"Target dataframe must contain columns: {required_columns}"
-            )
+        # Ensure all formation types are present
+        expected_columns = [
+            f"position_{position}" for position in sorted(POSITIONS_ENUM.keys())
+        ]
+        for col in expected_columns:
+            if col not in y.columns:
+                y[col] = 0
 
-        # Select relevant columns
-        transformed_df = tgt_df[["displayName", "x", "y"]]
-
-        # Convert to NumPy array
-        y = transformed_df.to_numpy()
+        # Sort columns
+        y = y[expected_columns]
+        y = y.to_numpy()[0].astype(np.float32)
 
         return y
 
