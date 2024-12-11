@@ -112,15 +112,16 @@ def add_features_to_tracking_df(
     og_len = len(tracking_df)
     tracking_df = (
         tracking_df.join(
-            plays_df.select(
-                "gameId",
-                "playId",
-                "possessionTeam",
-                "down",
-                "yardsToGo",
-            ),
+            plays_df.select("gameId", "playId", "defensiveTeam"),
             on=["gameId", "playId"],
             how="inner",
+        )
+        .join(
+            players_df.select(
+                ["nflId", "displayName", "position"]
+            ).unique(),  # select position column
+            on=["nflId", "displayName"],
+            how="left",
         )
         # .join(
         #    players_df.select(["nflId", "weight_Z", "height_Z"]).unique(),
@@ -128,12 +129,15 @@ def add_features_to_tracking_df(
         #    how="inner",
         # )
         .with_columns(
-            side=pl.when(pl.col("club") == pl.col("possessionTeam"))
+            isDefense=pl.when(pl.col("club") == pl.col("defensiveTeam"))
             .then(pl.lit(1))
             .otherwise(pl.lit(-1))
-            .alias("side"),
-        ).drop(["possessionTeam"])
+            .alias("isDefense"),
+        )
+        .drop(["defensiveTeam"])
+        .drop(["event"])
     )
+
     assert (
         len(tracking_df) == og_len
     ), "Lost rows when joining tracking data with play/player data"
@@ -286,6 +290,30 @@ def split_train_test_val(
     }
 
 
+def remove_null_positions(tracking_df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Remove rows with null positions from the tracking data.
+
+    Args:
+        tracking_df (pl.DataFrame): Tracking data
+
+    Returns:
+        pl.DataFrame: Tracking data with null positions removed.
+    """
+    # Players with null positions
+    null_position_players = tracking_df.filter(pl.col("position").is_null())
+    # Identify unique gameId and playId combinations with null positions
+    null_plays = null_position_players.select(["gameId", "playId"]).unique()
+    # Filter out the plays with null positions from the tracking data
+    filtered_df = tracking_df.join(null_plays, on=["gameId", "playId"], how="anti")
+    assert not filtered_df.filter(pl.col("position").is_null()).shape[
+        0
+    ], "There are still null positions"
+    print(f"Lost {len(tracking_df) - len(filtered_df)} rows")
+
+    return filtered_df
+
+
 def main():
     """
     Main execution function for data preparation.
@@ -310,6 +338,9 @@ def main():
     del players_df
     print("Convert tracking to cartesian")
     tracking_df = convert_tracking_to_cartesian(tracking_df)
+
+    print("Removing plays with null for positions")
+    tracking_df = remove_null_positions(tracking_df)
 
     print("Generate target - maskedPlayers")
     rel_tracking_df, maskedPlayers_df = get_masked_players(tracking_df)
