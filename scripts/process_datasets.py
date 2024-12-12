@@ -181,20 +181,24 @@ class BDB2025_Dataset(Dataset):
             np.ndarray: Transformed target values as one-hot encoded array
         """
         # Create one-hot encoding with prefix
-        y = pd.get_dummies(tgt_df["position"], prefix="position")
+        ohe_tgt = pd.get_dummies(tgt_df["position"], prefix="position")
 
         # Ensure all formation types are present
         expected_columns = [
             f"position_{position}" for position in sorted(POSITIONS_ENUM.keys())
         ]
         for col in expected_columns:
-            if col not in y.columns:
-                y[col] = 0
+            if col not in ohe_tgt.columns:
+                ohe_tgt[col] = 0
 
         # Sort columns
-        y = y[expected_columns]
-        y = y.to_numpy()[0].astype(np.float32)
+        ohe_tgt = ohe_tgt[expected_columns].to_numpy()[0].astype(np.float32)
 
+        x_tgt, y_tgt = np.array(tgt_df["x"]).flatten(), np.array(tgt_df["y"]).flatten()
+
+        tgts = [ohe_tgt, x_tgt, y_tgt]
+        y = np.array([np.concatenate(tgts, dtype=np.float32)])
+        # assert y.shape == (1, len(tgts)), f"Expected y.shape (1, {len(tgts)}), got {y.shape}"
         return y
 
     def transformer_transform_input_frame_df(
@@ -212,12 +216,34 @@ class BDB2025_Dataset(Dataset):
         Raises:
             AssertionError: If the output shape is not as expected
         """
-        features = ["x", "y"]
-        x = frame_df[features].to_numpy(dtype=np.float32)
-        assert x.shape == (
-            21,
-            len(features),
-        ), f"Expected shape (21, {len(features)}), got {x.shape}"
+        # Create one-hot encoding with prefix
+        ohe_feature = pd.get_dummies(frame_df["position"], prefix="position")
+        # Ensure all formation types are present
+        expected_columns = [
+            f"position_{position}" for position in sorted(POSITIONS_ENUM.keys())
+        ]
+        for col in expected_columns:
+            if col not in ohe_feature.columns:
+                ohe_feature[col] = 0
+
+        # Sort columns
+        ohe_feature = ohe_feature[expected_columns].to_numpy().astype(np.float32)
+        x_feature, y_feature = (
+            np.array(frame_df["x"]).flatten(),
+            np.array(frame_df["y"]).flatten(),
+        )
+
+        assert len(frame_df) == 21, "NOT THE SAME LEN"
+
+        # Reshape features to have the same first dimension
+        ohe_feature = ohe_feature.reshape(len(frame_df), -1)
+        x_feature = x_feature.reshape(len(frame_df), 1)
+        y_feature = y_feature.reshape(len(frame_df), 1)
+
+        features = [ohe_feature, x_feature, y_feature]
+        x = np.concatenate(features, dtype=np.float32, axis=1)
+
+        # assert x.shape == (21, len(features)), f"Expected x.shape (21, {len(features)}), got {x.shape}"
         return x
 
 
