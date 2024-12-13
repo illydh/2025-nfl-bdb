@@ -289,7 +289,7 @@ def main():
     """
     Main function to create and save datasets for different model types and splits.
     """
-    for split in ["test", "val", "train"]:
+    for split in ["train"]:
         feature_df = pl.read_parquet(PREPPED_DATA_DIR / f"{split}_features.parquet")
         tgt_df = pl.read_parquet(PREPPED_DATA_DIR / f"{split}_targets.parquet")
         for model_type in ["transformer"]:
