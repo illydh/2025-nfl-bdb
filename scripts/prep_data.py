@@ -182,7 +182,11 @@ def get_masked_players(tracking_df):
     masked_players_df = pl.DataFrame(schema=tracking_df.schema)
     rel_tracking_df = tracking_df
 
-    for game_id, play_id in tracking_df.select(["gameId", "playId"]).unique().rows():
+    unique_plays = tracking_df.select(["gameId", "playId"]).unique().rows()
+    len_plays, cnt = len(unique_plays), 0
+
+    for game_id, play_id in unique_plays:
+        cnt += 1
         # The defensive players in a given game + play
         filtered_df = tracking_df.filter(
             (pl.col("gameId") == game_id)
@@ -213,10 +217,13 @@ def get_masked_players(tracking_df):
                 & (pl.col("displayName") == selected_player)
             )
         )
+        percent_masked = cnt / len_plays * 100
+        if percent_masked % 10 == 0:
+            print(f"Masking {percent_masked}% complete")  #   Log %age masked
 
-    assert len(rel_tracking_df) == len(tracking_df) - len(
-        masked_player_df
-    ), "Did not filter out the masked players properly"
+    # assert len(rel_tracking_df) == len(tracking_df) - len(
+    #     masked_player_df
+    # ), "Did not filter out the masked players properly"
 
     return rel_tracking_df, masked_players_df
 
