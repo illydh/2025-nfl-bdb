@@ -214,8 +214,6 @@ def get_masked_players(tracking_df):
             )
         )
 
-        print(f"Player masked for gameId {game_id} playId {play_id}")
-
     assert len(rel_tracking_df) == len(tracking_df) - len(
         masked_player_df
     ), "Did not filter out the masked players properly"
