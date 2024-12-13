@@ -18,6 +18,7 @@ from pytorch_lightning import LightningModule
 
 torch.set_float32_matmul_precision("medium")
 
+
 class SportsTransformer(nn.Module):
     """
     Transformer model architecture for processing sports tracking data.
@@ -52,7 +53,9 @@ class SportsTransformer(nn.Module):
         """
         super().__init__()
         dim_feedforward = model_dim * 4
-        num_heads = min(16, max(2, 2 * round(model_dim / 64)))  # Attention is optimized for even number of heads
+        num_heads = min(
+            16, max(2, 2 * round(model_dim / 64))
+        )  # Attention is optimized for even number of heads
 
         self.hyperparams = {
             "model_dim": model_dim,
@@ -99,7 +102,7 @@ class SportsTransformer(nn.Module):
             nn.LayerNorm(model_dim // 4),
             nn.Linear(model_dim // 4, output_dim),  # Adjusted to match target shape
         )
- 
+
     def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass of the SportsTransformer.
@@ -114,7 +117,9 @@ class SportsTransformer(nn.Module):
         B, P, F = x.size()
 
         # Normalize features
-        x = self.feature_norm_layer(x.permute(0, 2, 1)).permute(0, 2, 1)  # [B,P,F] -> [B,P,F]
+        x = self.feature_norm_layer(x.permute(0, 2, 1)).permute(
+            0, 2, 1
+        )  # [B,P,F] -> [B,P,F]
 
         # Embed features
         x = self.feature_embedding_layer(x)  # [B,P,F] -> [B,P,M: model_dim]
@@ -123,12 +128,15 @@ class SportsTransformer(nn.Module):
         x = self.transformer_encoder(x)  # [B,P,M] -> [B,P,M]
 
         # Pool over player dimension
-        x = squeeze(self.player_pooling_layer(x.permute(0, 2, 1)), -1)  # [B,M,P] -> [B,M]
+        x = squeeze(
+            self.player_pooling_layer(x.permute(0, 2, 1)), -1
+        )  # [B,M,P] -> [B,M]
 
         # Decode to predict output
         x = self.decoder(x)  # [B,M] -> [B, output_dim]
-        
+
         return x
+
 
 class SportsTransformerLitModel(LightningModule):
     """
@@ -169,18 +177,27 @@ class SportsTransformerLitModel(LightningModule):
         super().__init__()
         self.feature_len = feature_len
         self.model = SportsTransformer(
-            feature_len=self.feature_len, model_dim=model_dim, num_layers=num_layers, dropout=dropout, output_dim=output_dim
+            feature_len=self.feature_len,
+            model_dim=model_dim,
+            num_layers=num_layers,
+            dropout=dropout,
+            output_dim=output_dim,
         )
-        self.example_input_array = torch.randn((batch_size, 22, self.feature_len))
+        self.example_input_array = torch.randn(
+            (batch_size, 21, self.feature_len)
+        )  # changed to 21
 
         self.learning_rate = learning_rate
-        self.num_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        self.num_params = sum(
+            p.numel() for p in self.model.parameters() if p.requires_grad
+        )
         self.hparams["params"] = self.num_params
         for k, v in self.model.hyperparams.items():
             self.hparams[k] = v
 
         self.save_hyperparameters()
-        self.loss_fn = torch.nn.BCEWithLogitsLoss()
+        self.loss_fn = torch.nn.CrossEntropyLoss()
+        # self.loss_fn = torch.nn.BCEWithLogitsLoss()
 
     def forward(self, x: Tensor) -> Tensor:
         """
@@ -210,7 +227,14 @@ class SportsTransformerLitModel(LightningModule):
         x, y = batch
         y_hat = self.model(x)
         loss = self.loss_fn(y_hat, y)
-        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log(
+            "train_loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
         return loss
 
     def validation_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
@@ -227,10 +251,19 @@ class SportsTransformerLitModel(LightningModule):
         x, y = batch
         y_hat = self.model(x)
         loss = self.loss_fn(y_hat, y)
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log(
+            "val_loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
         return loss
 
-    def predict_step(self, batch: tuple[Tensor, Tensor], batch_idx: int, dataloader_idx: int = 0) -> Tensor:
+    def predict_step(
+        self, batch: tuple[Tensor, Tensor], batch_idx: int, dataloader_idx: int = 0
+    ) -> Tensor:
         """
         Prediction step for the model.
 
@@ -256,4 +289,3 @@ class SportsTransformerLitModel(LightningModule):
             AdamW: Configured optimizer.
         """
         return AdamW(self.parameters(), lr=self.learning_rate)
-    
