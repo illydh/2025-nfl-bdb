@@ -31,25 +31,25 @@ DATASET_DIR = Path("./drive/My Drive/bdb-2025/working/datasets/")
 
 # Enumerate player positions
 POSITIONS_ENUM = {
-    'T': 0,
-    'CB': 1,
-    'G': 2,
-    'SS': 3,
-    'FS': 4,
-    'DB': 5,
-    'MLB': 6,
-    'LB': 7,
-    'OLB': 8,
-    'DT': 9,
-    'ILB': 10,
-    'NT': 11,
-    'TE': 12,
-    'WR': 13,
-    'QB': 14,
-    'RB': 15,
-    'DE': 16,
-    'FB': 17,
-    'C': 18
+    "T": 0,
+    "CB": 1,
+    "G": 2,
+    "SS": 3,
+    "FS": 4,
+    "DB": 5,
+    "MLB": 6,
+    "LB": 7,
+    "OLB": 8,
+    "DT": 9,
+    "ILB": 10,
+    "NT": 11,
+    "TE": 12,
+    "WR": 13,
+    "QB": 14,
+    "RB": 15,
+    "DE": 16,
+    "FB": 17,
+    "C": 18,
 }
 
 
@@ -202,12 +202,16 @@ class BDB2025_Dataset(Dataset):
 
         # Sort columns
         ohe_tgt = ohe_tgt[expected_columns].to_numpy()[0].astype(np.float32)
-
         x_tgt, y_tgt = np.array(tgt_df["x"]).flatten(), np.array(tgt_df["y"]).flatten()
 
+        # Reshape to ensure each feature has the same first dimension
+        # ohe_tgt = ohe_tgt.reshape(1, -1)
+        # x_tgt = x_tgt.reshape(1, -1)
+        # y_tgt = y_tgt.reshape(1, -1)
+
         tgts = [ohe_tgt, x_tgt, y_tgt]
-        y = np.array([np.concatenate(tgts, dtype=np.float32)])
-        # assert y.shape == (1, len(tgts)), f"Expected y.shape (1, {len(tgts)}), got {y.shape}"
+        y = np.concatenate(tgts, dtype=np.float32)
+        assert y.shape == (21,), f"Expected y.shape (21,), got {y.shape}"
         return y
 
     def transformer_transform_input_frame_df(
@@ -279,25 +283,3 @@ def load_datasets(model_type: str, split: str) -> BDB2025_Dataset:
 
     with open(file_path, "rb") as f:
         return pickle.load(f)
-
-
-def main():
-    """
-    Main function to create and save datasets for different model types and splits.
-    """
-    for split in ["test", "val", "train"]:
-        feature_df = pl.read_parquet(PREPPED_DATA_DIR / f"{split}_features.parquet")
-        tgt_df = pl.read_parquet(PREPPED_DATA_DIR / f"{split}_targets.parquet")
-        for model_type in ["transformer"]:
-            print(f"Creating dataset for {model_type=}, {split=}...")
-            tic = time.time()
-            dataset = BDB2025_Dataset(model_type, feature_df, tgt_df)
-            out_dir = DATASET_DIR / model_type
-            out_dir.mkdir(exist_ok=True, parents=True)
-            with open(out_dir / f"{split}_dataset.pkl", "wb") as f:
-                pickle.dump(dataset, f)
-            print(f"Took {(time.time() - tic)/60:.1f} mins")
-
-
-if __name__ == "__main__":
-    main()
