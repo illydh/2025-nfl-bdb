@@ -31,16 +31,25 @@ DATASET_DIR = Path("./drive/My Drive/bdb-2025/working/datasets/")
 
 # Enumerate player positions
 POSITIONS_ENUM = {
-    "LB": 0,
-    "SS": 1,
-    "NT": 2,
-    "MLB": 3,
-    "DT": 4,
-    "CB": 5,
-    "DE": 6,
-    "ILB": 7,
-    "FS": 8,
-    "OLB": 9,
+    'T': 0,
+    'CB': 1,
+    'G': 2,
+    'SS': 3,
+    'FS': 4,
+    'DB': 5,
+    'MLB': 6,
+    'LB': 7,
+    'OLB': 8,
+    'DT': 9,
+    'ILB': 10,
+    'NT': 11,
+    'TE': 12,
+    'WR': 13,
+    'QB': 14,
+    'RB': 15,
+    'DE': 16,
+    'FB': 17,
+    'C': 18
 }
 
 
