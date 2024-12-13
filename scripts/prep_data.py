@@ -135,7 +135,6 @@ def add_features_to_tracking_df(
             .alias("isDefense"),
         )
         .drop(["defensiveTeam"])
-        .drop(["event"])
     )
 
     assert (
