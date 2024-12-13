@@ -283,3 +283,25 @@ def load_datasets(model_type: str, split: str) -> BDB2025_Dataset:
 
     with open(file_path, "rb") as f:
         return pickle.load(f)
+
+
+def main():
+    """
+    Main function to create and save datasets for different model types and splits.
+    """
+    for split in ["test", "val", "train"]:
+        feature_df = pl.read_parquet(PREPPED_DATA_DIR / f"{split}_features.parquet")
+        tgt_df = pl.read_parquet(PREPPED_DATA_DIR / f"{split}_targets.parquet")
+        for model_type in ["transformer"]:
+            print(f"Creating dataset for {model_type=}, {split=}...")
+            tic = time.time()
+            dataset = BDB2025_Dataset(model_type, feature_df, tgt_df)
+            out_dir = DATASET_DIR / model_type
+            out_dir.mkdir(exist_ok=True, parents=True)
+            with open(out_dir / f"{split}_dataset.pkl", "wb") as f:
+                pickle.dump(dataset, f)
+            print(f"Took {(time.time() - tic)/60:.1f} mins")
+
+
+if __name__ == "__main__":
+    main()
