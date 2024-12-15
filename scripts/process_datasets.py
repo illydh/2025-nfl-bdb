@@ -189,29 +189,29 @@ class BDB2025_Dataset(Dataset):
         Returns:
             np.ndarray: Transformed target values as one-hot encoded array
         """
-        # Create one-hot encoding with prefix
-        ohe_tgt = pd.get_dummies(tgt_df["position"], prefix="position")
+        # Encoding position of masked player
+        masked_position = tgt_df["position"]
+        if (
+            masked_position not in POSITIONS_ENUM.keys()
+        ):  #   if the position is not in the enumerated list of positions
+            POSITIONS_ENUM[tgt_df["position"]] = len(
+                POSITIONS_ENUM
+            )  #   create new key, value pair in the enumerated dict
+        position_idx = (
+            np.array(POSITIONS_ENUM[tgt_df["position"]]).flatten().reshape(1, -1)
+        )  #   encode this position
 
-        # Ensure all formation types are present
-        expected_columns = [
-            f"position_{position}" for position in sorted(POSITIONS_ENUM.keys())
-        ]
-        for col in expected_columns:
-            if col not in ohe_tgt.columns:
-                ohe_tgt[col] = 0
+        x_tgt = np.array(tgt_df["x"]).flatten().reshape(1, -1)
+        y_tgt = (
+            np.array(tgt_df["y"]).flatten().reshape(1, -1)
+        )  # Ensure all arrays have the same shape (1,)
 
-        # Sort columns
-        ohe_tgt = ohe_tgt[expected_columns].to_numpy()[0].astype(np.float32)
-        x_tgt, y_tgt = np.array(tgt_df["x"]).flatten(), np.array(tgt_df["y"]).flatten()
-
-        # Reshape to ensure each feature has the same first dimension
-        # ohe_tgt = ohe_tgt.reshape(1, -1)
-        # x_tgt = x_tgt.reshape(1, -1)
-        # y_tgt = y_tgt.reshape(1, -1)
-
-        tgts = [ohe_tgt, x_tgt, y_tgt]
-        y = np.concatenate(tgts, dtype=np.float32)
-        assert y.shape == (21,), f"Expected y.shape (21,), got {y.shape}"
+        tgts = [position_idx, x_tgt, y_tgt]
+        y = np.concatenate(tgts, dtype=np.float32, axis=-1)
+        assert y.shape == (
+            1,
+            len(tgts),
+        ), f"Expected y.shape (1, {len(tgts)}), got {y.shape}"
         return y
 
     def transformer_transform_input_frame_df(
@@ -229,34 +229,35 @@ class BDB2025_Dataset(Dataset):
         Raises:
             AssertionError: If the output shape is not as expected
         """
-        # Create one-hot encoding with prefix
-        ohe_feature = pd.get_dummies(frame_df["position"], prefix="position")
-        # Ensure all formation types are present
-        expected_columns = [
-            f"position_{position}" for position in sorted(POSITIONS_ENUM.keys())
-        ]
-        for col in expected_columns:
-            if col not in ohe_feature.columns:
-                ohe_feature[col] = 0
 
-        # Sort columns
-        ohe_feature = ohe_feature[expected_columns].to_numpy().astype(np.float32)
+        assert len(frame_df) == 21, "NOT THE SAME LEN"
+
+        position_idx = []
+        # Create one-hot encoding with prefix
+        for pos in frame_df["position"]:
+            if pos not in POSITIONS_ENUM.keys():
+                POSITIONS_ENUM[pos] = len(POSITIONS_ENUM)
+            position_idx.append(POSITIONS_ENUM[pos])
+        position_idx = np.array(position_idx)  # Convert list to NumPy array
         x_feature, y_feature = (
             np.array(frame_df["x"]).flatten(),
             np.array(frame_df["y"]).flatten(),
         )
 
-        assert len(frame_df) == 21, "NOT THE SAME LEN"
-
         # Reshape features to have the same first dimension
-        ohe_feature = ohe_feature.reshape(len(frame_df), -1)
+        position_idx = np.array(position_idx).reshape(
+            len(frame_df), -1
+        )  # Reshape to (1, num_positions)
         x_feature = x_feature.reshape(len(frame_df), 1)
         y_feature = y_feature.reshape(len(frame_df), 1)
 
-        features = [ohe_feature, x_feature, y_feature]
+        features = [position_idx, x_feature, y_feature]
         x = np.concatenate(features, dtype=np.float32, axis=1)
 
-        # assert x.shape == (21, len(features)), f"Expected x.shape (21, {len(features)}), got {x.shape}"
+        assert x.shape == (
+            21,
+            len(features),
+        ), f"Expected x.shape (21, {len(features)}), got {x.shape}"
         return x
 
 
@@ -289,7 +290,7 @@ def main():
     """
     Main function to create and save datasets for different model types and splits.
     """
-    for split in ["train"]:
+    for split in ["test", "val", "train"]:
         feature_df = pl.read_parquet(PREPPED_DATA_DIR / f"{split}_features.parquet")
         tgt_df = pl.read_parquet(PREPPED_DATA_DIR / f"{split}_targets.parquet")
         for model_type in ["transformer"]:
