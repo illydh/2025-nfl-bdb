@@ -190,28 +190,19 @@ class BDB2025_Dataset(Dataset):
             np.ndarray: Transformed target values as one-hot encoded array
         """
         # Encoding position of masked player
-        masked_position = tgt_df["position"]
-        if (
-            masked_position not in POSITIONS_ENUM.keys()
-        ):  #   if the position is not in the enumerated list of positions
-            POSITIONS_ENUM[tgt_df["position"]] = len(
-                POSITIONS_ENUM
-            )  #   create new key, value pair in the enumerated dict
-        position_idx = (
-            np.array(POSITIONS_ENUM[tgt_df["position"]]).flatten().reshape(1, -1)
-        )  #   encode this position
+        position_idx = np.array(
+            POSITIONS_ENUM[tgt_df["position"]]
+        ).flatten()  #   encode this position
 
-        x_tgt = np.array(tgt_df["x"]).flatten().reshape(1, -1)
-        y_tgt = (
-            np.array(tgt_df["y"]).flatten().reshape(1, -1)
-        )  # Ensure all arrays have the same shape (1,)
+        # Get player coordinate targets
+        x_tgt = np.array(tgt_df["x"]).flatten()
+        y_tgt = np.array(tgt_df["y"]).flatten()
 
         tgts = [position_idx, x_tgt, y_tgt]
-        y = np.concatenate(tgts, dtype=np.float32, axis=-1)
+        y = np.concatenate(tgts, dtype=np.float32)
         assert y.shape == (
-            1,
             len(tgts),
-        ), f"Expected y.shape (1, {len(tgts)}), got {y.shape}"
+        ), f"Expected y.shape ({len(tgts)}, ), got {y.shape}"
         return y
 
     def transformer_transform_input_frame_df(
