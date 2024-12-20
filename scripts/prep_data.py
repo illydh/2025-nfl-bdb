@@ -77,7 +77,7 @@ def get_plays_df() -> pl.DataFrame:
     )
 
 
-def get_tracking_df() -> pl.DataFrame:
+def get_tracking_df() -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Load tracking data and preprocesses features. Notably, exclude rows representing the football's movement.
 
@@ -86,10 +86,16 @@ def get_tracking_df() -> pl.DataFrame:
     """
     # don't include football rows for this project.
     # NOTE: Only processing week 1 for the sake of time.  Change "1" to "*" to process all weeks
-    return pl.read_csv(
-        INPUT_DATA_DIR / "tracking_week_1.csv",
-        null_values=["NA", "nan", "N/A", "NaN", ""],
-    ).filter(pl.col("displayName") != "football")
+    tracking_dfs = []
+    for week in range(1, 10):
+        print(f"Load tracking week {week}")
+        tracking_dfs.append(
+            pl.read_csv(
+                INPUT_DATA_DIR / f"tracking_week_{week}.csv",
+                null_values=["NA", "nan", "N/A", "NaN", ""],
+            ).filter(pl.col("displayName") != "football")
+        )
+    return pl.concat(tracking_dfs[:-1]), tracking_dfs[-1]
 
 
 def add_features_to_tracking_df(
@@ -179,8 +185,8 @@ def get_masked_players(tracking_df):
     Returns:
         tuple: A tuple containing the filtered tracking DataFrame and the masked players DataFrame.
     """
-    masked_players_df = pl.DataFrame(schema=tracking_df.schema)
-    rel_tracking_df = tracking_df
+    masked_players_df = tracking_df.pl.filter(pl.col("isDefense") == 1)
+    rel_tracking_df = pl.Dataframe
 
     unique_plays = tracking_df.select(["gameId", "playId"]).unique().rows()
     len_plays, cnt = len(unique_plays), 0
@@ -188,35 +194,28 @@ def get_masked_players(tracking_df):
     for game_id, play_id in unique_plays:
         cnt += 1
         # The defensive players in a given game + play
-        filtered_df = tracking_df.filter(
+        defensive_df = tracking_df.filter(
             (pl.col("gameId") == game_id)
             & (pl.col("playId") == play_id)
-            & (pl.col("frameId") == 1)
             & (pl.col("isDefense") == 1)
         )
         assert (
-            len(filtered_df) == 11
+            len(defensive_df.select("displayName").unique()) == 11
         ), "No players found for gameId: {}, playId: {}".format(game_id, play_id)
 
         # Retrieve masked player
-        selected_player = random.choice(filtered_df["displayName"].to_list())
-        masked_player_df = tracking_df.filter(
-            (pl.col("gameId") == game_id)
-            & (pl.col("playId") == play_id)
-            & (pl.col("displayName") == selected_player)
-        )
-        masked_players_df = pl.concat(
-            [masked_players_df, masked_player_df], how="vertical"
-        )
-
-        # Filter out the selected player from tracking_df
-        rel_tracking_df = rel_tracking_df.filter(
-            ~(
-                (pl.col("gameId") == game_id)
-                & (pl.col("playId") == play_id)
-                & (pl.col("displayName") == selected_player)
+        for selected_player in defensive_df.to_list():
+            # Filter out the selected player from tracking_df
+            filtered_tracking_df = tracking_df.filter(
+                ~(
+                    (pl.col("gameId") == game_id)
+                    & (pl.col("playId") == play_id)
+                    & (pl.col("displayName") == selected_player)
+                )
             )
-        )
+            rel_tracking_df = pl.concat(
+                [rel_tracking_df, filtered_tracking_df], how="vertical"
+            )
         percent_masked = cnt / len_plays * 100
         if percent_masked % 10 == 0:
             print(f"Masking {percent_masked}% complete")  #   Log %age masked
@@ -228,11 +227,9 @@ def get_masked_players(tracking_df):
     return rel_tracking_df, masked_players_df
 
 
-# Provided from SportsTransformers-utils
-
-
 def split_train_test_val(
-    tracking_df: pl.DataFrame, target_df: pl.DataFrame
+    tracking_dfs: tuple[pl.DataFrame, pl.DataFrame],
+    target_dfs: tuple[pl.DataFrame, pl.DataFrame],
 ) -> dict[str, pl.DataFrame]:
     """
     Split data into train, validation, and test sets.
@@ -240,45 +237,55 @@ def split_train_test_val(
     This ensures no target contamination between splits.
 
     Args:
-        tracking_df (pl.DataFrame): Tracking data
-        target_df (pl.DataFrame): Target data
+        tracking_df (tuple[pl.DataFrame, pl.DataFrame]): Tracking data
+        target_df (tuple[pl.DataFrame, pl.DataFrame]): Target data
 
     Returns:
         dict: Dictionary containing train, validation, and test dataframes.
     """
-    tracking_df = tracking_df.sort(["gameId", "playId", "frameId"])
-    target_df = target_df.sort(["gameId", "playId"])
+    tracking_df_weeks_1_8, tracking_df_week_9 = tracking_dfs
+    target_df_weeks_1_8, target_df_week_9 = target_dfs
 
     print(
-        f"Total set: {tracking_df.n_unique(['gameId', 'playId'])} plays,",
-        f"{tracking_df.n_unique(['gameId', 'playId', 'frameId'])} frames",
+        f"Total set (weeks 1-8): {tracking_df_weeks_1_8.n_unique(['gameId', 'playId'])} plays,",
+        f"{tracking_df_weeks_1_8.n_unique(['gameId', 'playId', 'frameId'])} frames",
+    )
+    print(
+        f"Total set (week 9): {tracking_df_week_9.n_unique(['gameId', 'playId'])} plays,",
+        f"{tracking_df_week_9.n_unique(['gameId', 'playId', 'frameId'])} frames",
     )
 
-    test_val_ids = (
-        tracking_df.select(["gameId", "playId"])
-        .unique(maintain_order=True)
-        .sample(fraction=0.3, seed=42)
-    )
-    train_tracking_df = tracking_df.join(
-        test_val_ids, on=["gameId", "playId"], how="anti"
-    )
-    train_tgt_df = target_df.join(test_val_ids, on=["gameId", "playId"], how="anti")
+    # Use weeks 1-8 for training
+    train_tracking_df = tracking_df_weeks_1_8
+    train_tgt_df = target_df_weeks_1_8
+
     print(
         f"Train set: {train_tracking_df.n_unique(['gameId', 'playId'])} plays,",
         f"{train_tracking_df.n_unique(['gameId', 'playId', 'frameId'])} frames",
     )
 
-    test_ids = test_val_ids.sample(fraction=0.5, seed=42)  # 70-15-15 split
-    test_tracking_df = tracking_df.join(test_ids, on=["gameId", "playId"], how="inner")
-    test_tgt_df = target_df.join(test_ids, on=["gameId", "playId"], how="inner")
+    # Split week 9 in half for validation and test
+    week9_ids = tracking_df_week_9.select(["gameId", "playId"]).unique(
+        maintain_order=True
+    )
+    test_ids = week9_ids.sample(fraction=0.5, seed=42)
+    val_ids = week9_ids.join(test_ids, on=["gameId", "playId"], how="anti")
+
+    test_tracking_df = tracking_df_week_9.join(
+        test_ids, on=["gameId", "playId"], how="inner"
+    )
+    test_tgt_df = target_df_week_9.join(test_ids, on=["gameId", "playId"], how="inner")
+
+    val_tracking_df = tracking_df_week_9.join(
+        val_ids, on=["gameId", "playId"], how="inner"
+    )
+    val_tgt_df = target_df_week_9.join(val_ids, on=["gameId", "playId"], how="inner")
+
     print(
         f"Test set: {test_tracking_df.n_unique(['gameId', 'playId'])} plays,",
         f"{test_tracking_df.n_unique(['gameId', 'playId', 'frameId'])} frames",
     )
 
-    val_ids = test_val_ids.join(test_ids, on=["gameId", "playId"], how="anti")
-    val_tracking_df = tracking_df.join(val_ids, on=["gameId", "playId"], how="inner")
-    val_tgt_df = target_df.join(val_ids, on=["gameId", "playId"], how="inner")
     print(
         f"Validation set: {val_tracking_df.n_unique(['gameId', 'playId'])} plays,",
         f"{val_tracking_df.n_unique(['gameId', 'playId','frameId'])} frames",
@@ -334,24 +341,36 @@ def main():
     print("Load plays")
     plays_df = get_plays_df()
     print("Load tracking")
-    tracking_df = get_tracking_df()
+    tracking_df, tracking_week_9_df = get_tracking_df()
     print("tracking_df rows:", len(tracking_df))
 
     print("Add features to tracking")
     tracking_df = add_features_to_tracking_df(tracking_df, players_df, plays_df)
+    tracking_week_9_df = add_features_to_tracking_df(
+        tracking_week_9_df, players_df, plays_df
+    )
     del players_df
     print("Convert tracking to cartesian")
     tracking_df = convert_tracking_to_cartesian(tracking_df)
+    tracking_week_9_df = convert_tracking_to_cartesian(tracking_week_9_df)
 
-    print("Removing plays with null for positions")
+    print("Remove plays with null for positions")
     tracking_df = remove_null_positions(tracking_df)
+    tracking_week_9_df = remove_null_positions(tracking_week_9_df)
 
-    print("Generate target - maskedPlayers")
+    print("Generate target for tracking weeks 1-8")
     rel_tracking_df, maskedPlayers_df = get_masked_players(tracking_df)
+    print("Generate target for tracking week 9")
+    rel_tracking_week_9_df, maskedPlayers_week_9_df = get_masked_players(
+        tracking_week_9_df
+    )
 
     # Writing out splits to OUT_DIR
     print("Split train/test/val")
-    split_dfs = split_train_test_val(rel_tracking_df, maskedPlayers_df)
+    split_dfs = split_train_test_val(
+        (rel_tracking_df, rel_tracking_week_9_df),
+        (maskedPlayers_df, maskedPlayers_week_9_df),
+    )
 
     out_dir = Path(OUT_DIR)
     out_dir.mkdir(exist_ok=True, parents=True)
