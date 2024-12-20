@@ -185,7 +185,7 @@ def get_masked_players(tracking_df):
     Returns:
         tuple: A tuple containing the filtered tracking DataFrame and the masked players DataFrame.
     """
-    masked_players_df = tracking_df.pl.filter(pl.col("isDefense") == 1)
+    masked_players_df = tracking_df.filter(pl.col("isDefense") == 1)
     rel_tracking_df = pl.Dataframe
 
     unique_plays = tracking_df.select(["gameId", "playId"]).unique().rows()
