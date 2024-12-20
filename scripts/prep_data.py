@@ -199,7 +199,7 @@ def get_masked_players(tracking_df):
             & (pl.col("playId") == play_id)
             & (pl.col("isDefense") == 1)
         )
-        defense_names = defensive_df.select("displayName").unique().to_list()
+        defense_names = defensive_df["displayName"].unique().to_list()
         assert (
             len(defense_names) == 11
         ), "No players found for gameId: {}, playId: {}".format(game_id, play_id)
