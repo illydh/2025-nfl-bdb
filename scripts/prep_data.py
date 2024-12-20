@@ -29,8 +29,6 @@ import random
 INPUT_DATA_DIR = Path("./")
 OUT_DIR = Path("./drive/My Drive/bdb-2025/split_prepped_data/")
 
-OUT_DIR.mkdir(parents=True, exist_ok=True)  # Create directory if it doesn't exist
-
 
 def get_players_df() -> pl.DataFrame:
     """
@@ -86,16 +84,20 @@ def get_tracking_df() -> pl.DataFrame:
     """
     # don't include football rows for this project.
     # NOTE: Only processing week 1 for the sake of time.  Change "1" to "*" to process all weeks
-    tracking_dfs = []
-    for week in range(1, 5):
-        print(f"Load tracking week {week}")
-        tracking_dfs.append(
-            pl.read_csv(
-                INPUT_DATA_DIR / f"tracking_week_{week}.csv",
-                null_values=["NA", "nan", "N/A", "NaN", ""],
-            ).filter(pl.col("displayName") != "football")
-        )
-    return pl.concat(tracking_dfs)
+    # tracking_dfs = []
+    # for week in range(1, 5):
+    #     print(f"Load tracking week {week}")
+    #     tracking_dfs.append(
+    #         pl.read_csv(
+    #             INPUT_DATA_DIR / f"tracking_week_{week}.csv",
+    #             null_values=["NA", "nan", "N/A", "NaN", ""],
+    #         ).filter(pl.col("displayName") != "football")
+    #     )
+    # return pl.concat(tracking_dfs)
+    return pl.read_csv(
+        INPUT_DATA_DIR / f"tracking_week_1.csv",
+        null_values=["NA", "nan", "N/A", "NaN", ""],
+    ).filter(pl.col("displayName") != "football")
 
 
 def add_features_to_tracking_df(

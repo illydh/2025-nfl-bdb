@@ -29,8 +29,6 @@ import random
 INPUT_DATA_DIR = Path("./")
 OUT_DIR = Path("./drive/My Drive/bdb-2025/split_prepped_data/")
 
-OUT_DIR.mkdir(parents=True, exist_ok=True)  # Create directory if it doesn't exist
-
 
 def get_players_df() -> pl.DataFrame:
     """
