@@ -27,7 +27,7 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 
 PREPPED_DATA_DIR = Path("./drive/My Drive/bdb-2025/split_prepped_data/")
-DATASET_DIR = Path("./drive/My Drive/bdb-2025/working/datasets/")
+DATASET_DIR = Path("./drive/My Drive/bdb-2025/split_prepped_data/working/datasets/")
 
 # Enumerate player positions
 POSITIONS_ENUM = {
