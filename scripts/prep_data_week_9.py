@@ -86,16 +86,10 @@ def get_tracking_df() -> pl.DataFrame:
     """
     # don't include football rows for this project.
     # NOTE: Only processing week 1 for the sake of time.  Change "1" to "*" to process all weeks
-    tracking_dfs = []
-    for week in range(1, 5):
-        print(f"Load tracking week {week}")
-        tracking_dfs.append(
-            pl.read_csv(
-                INPUT_DATA_DIR / f"tracking_week_{week}.csv",
-                null_values=["NA", "nan", "N/A", "NaN", ""],
-            ).filter(pl.col("displayName") != "football")
-        )
-    return pl.concat(tracking_dfs)
+    return pl.read_csv(
+        INPUT_DATA_DIR / f"tracking_week_9.csv",
+        null_values=["NA", "nan", "N/A", "NaN", ""],
+    ).filter(pl.col("displayName") != "football")
 
 
 def add_features_to_tracking_df(
@@ -175,7 +169,7 @@ def convert_tracking_to_cartesian(tracking_df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def get_masked_players(tracking_df):
+def get_masked_players(tracking_df) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Randomly selects a player from a game and play, and filters their data from each frame.
 
@@ -242,19 +236,35 @@ def split_train_test_val(
         dict: Dictionary containing train, validation, and test dataframes.
     """
     print(
-        f"Total set (weeks 1-4): {tracking_df.n_unique(['gameId', 'playId'])} plays,",
+        f"Total set (week 9): {tracking_df.n_unique(['gameId', 'playId'])} plays,",
         f"{tracking_df.n_unique(['gameId', 'playId', 'frameId'])} frames",
     )
-    # Use weeks 1-8 for training
-    train_tracking_df = tracking_df
-    train_tgt_df = target_df
+    # Split week 9 in half for validation and test
+    week9_ids = tracking_df.select(["gameId", "playId"]).unique(maintain_order=True)
+    test_ids = week9_ids.sample(fraction=0.5, seed=42)
+    val_ids = week9_ids.join(test_ids, on=["gameId", "playId"], how="anti")
+
+    test_tracking_df = tracking_df.join(test_ids, on=["gameId", "playId"], how="inner")
+    test_tgt_df = target_df.join(test_ids, on=["gameId", "playId"], how="inner")
+
+    val_tracking_df = tracking_df.join(val_ids, on=["gameId", "playId"], how="inner")
+    val_tgt_df = target_df.join(val_ids, on=["gameId", "playId"], how="inner")
+
     print(
-        f"Train set 1: {train_tracking_df.n_unique(['gameId', 'playId'])} plays,",
-        f"{train_tracking_df.n_unique(['gameId', 'playId', 'frameId'])} frames",
+        f"Test set: {test_tracking_df.n_unique(['gameId', 'playId'])} plays,",
+        f"{test_tracking_df.n_unique(['gameId', 'playId', 'frameId'])} frames",
     )
+
+    print(
+        f"Validation set: {val_tracking_df.n_unique(['gameId', 'playId'])} plays,",
+        f"{val_tracking_df.n_unique(['gameId', 'playId','frameId'])} frames",
+    )
+
     return {
-        "train_features_1": train_tracking_df,
-        "train_targets_1": train_tgt_df,
+        "test_features": test_tracking_df,
+        "test_targets": test_tgt_df,
+        "val_features": val_tracking_df,
+        "val_targets": val_tgt_df,
     }
 
 
