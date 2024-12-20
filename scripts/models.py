@@ -1,4 +1,5 @@
 # %% [code]
+
 """
 Model Architectures for NFL Big Data Bowl 2025 prediction task
 
@@ -41,6 +42,7 @@ class SportsTransformer(nn.Module):
         num_layers: int = 2,
         output_dim: int = 7,
         dropout: float = 0.3,
+        num_positions: int = 19,  # Number of possible positions
     ):
         """
         Initialize the SportsTransformer.
@@ -53,9 +55,7 @@ class SportsTransformer(nn.Module):
         """
         super().__init__()
         dim_feedforward = model_dim * 4
-        num_heads = min(
-            16, max(2, 2 * round(model_dim / 64))
-        )  # Attention is optimized for even number of heads
+        num_heads = min(16, max(2, 2 * round(model_dim / 64)))
 
         self.hyperparams = {
             "model_dim": model_dim,
@@ -64,10 +64,7 @@ class SportsTransformer(nn.Module):
             "dim_feedforward": dim_feedforward,
         }
 
-        # Normalize input features
         self.feature_norm_layer = nn.BatchNorm1d(feature_len)
-
-        # Embed input features to model dimension
         self.feature_embedding_layer = nn.Sequential(
             nn.Linear(feature_len, model_dim),
             nn.ReLU(),
@@ -75,9 +72,6 @@ class SportsTransformer(nn.Module):
             nn.Dropout(dropout),
         )
 
-        # Transformer Encoder
-        # This component applies multiple layers of self-attention and feed-forward networks
-        # to process player data in a permutation-equivariant manner.
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
                 d_model=model_dim,
@@ -89,21 +83,24 @@ class SportsTransformer(nn.Module):
             num_layers=num_layers,
         )
 
-        # Pool across player dimension
         self.player_pooling_layer = nn.AdaptiveAvgPool1d(1)
 
-        # Task-specific Decoder to predict output.
-        self.decoder = nn.Sequential(
-            nn.Linear(model_dim, model_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
+        # Separate decoders for position and coordinates
+        self.position_decoder = nn.Sequential(
             nn.Linear(model_dim, model_dim // 4),
             nn.ReLU(),
             nn.LayerNorm(model_dim // 4),
-            nn.Linear(model_dim // 4, output_dim),  # Adjusted to match target shape
+            nn.Linear(model_dim // 4, num_positions),  # Predict position index
         )
 
-    def forward(self, x: Tensor) -> Tensor:
+        self.coordinate_decoder = nn.Sequential(
+            nn.Linear(model_dim, model_dim // 4),
+            nn.ReLU(),
+            nn.LayerNorm(model_dim // 4),
+            nn.Linear(model_dim // 4, 2),  # Predict x and y coordinates
+        )
+
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """
         Forward pass of the SportsTransformer.
 
@@ -113,29 +110,17 @@ class SportsTransformer(nn.Module):
         Returns:
             Tensor: Predicted output of shape [batch_size, 22].
         """
-        # x: [B: batch_size, P: # of players, F: feature_len]
         B, P, F = x.size()
 
-        # Normalize features
-        x = self.feature_norm_layer(x.permute(0, 2, 1)).permute(
-            0, 2, 1
-        )  # [B,P,F] -> [B,P,F]
+        x = self.feature_norm_layer(x.permute(0, 2, 1)).permute(0, 2, 1)
+        x = self.feature_embedding_layer(x)
+        x = self.transformer_encoder(x)
+        x = squeeze(self.player_pooling_layer(x.permute(0, 2, 1)), -1)
 
-        # Embed features
-        x = self.feature_embedding_layer(x)  # [B,P,F] -> [B,P,M: model_dim]
+        position_logits = self.position_decoder(x)  # [B, num_positions]
+        coordinates = self.coordinate_decoder(x)  # [B, 2]
 
-        # Apply transformer encoder
-        x = self.transformer_encoder(x)  # [B,P,M] -> [B,P,M]
-
-        # Pool over player dimension
-        x = squeeze(
-            self.player_pooling_layer(x.permute(0, 2, 1)), -1
-        )  # [B,M,P] -> [B,M]
-
-        # Decode to predict output
-        x = self.decoder(x)  # [B,M] -> [B, output_dim]
-
-        return x
+        return position_logits, coordinates
 
 
 class SportsTransformerLitModel(LightningModule):
@@ -162,6 +147,7 @@ class SportsTransformerLitModel(LightningModule):
         output_dim: int,
         dropout: float = 0.1,
         learning_rate: float = 1e-3,
+        num_positions: int = 19,
     ):
         """
         Initialize the SportsTransformerLitModel.
@@ -176,17 +162,15 @@ class SportsTransformerLitModel(LightningModule):
         """
         super().__init__()
         self.feature_len = feature_len
+        self.num_positions = num_positions
         self.model = SportsTransformer(
             feature_len=self.feature_len,
             model_dim=model_dim,
             num_layers=num_layers,
             dropout=dropout,
-            output_dim=output_dim,
+            num_positions=self.num_positions,
         )
-        self.example_input_array = torch.randn(
-            (batch_size, 21, self.feature_len)
-        )  # changed to 21
-
+        self.example_input_array = torch.randn((batch_size, 21, self.feature_len))
         self.learning_rate = learning_rate
         self.num_params = sum(
             p.numel() for p in self.model.parameters() if p.requires_grad
@@ -194,12 +178,11 @@ class SportsTransformerLitModel(LightningModule):
         self.hparams["params"] = self.num_params
         for k, v in self.model.hyperparams.items():
             self.hparams[k] = v
-
         self.save_hyperparameters()
-        self.loss_fn = torch.nn.CrossEntropyLoss()
-        # self.loss_fn = torch.nn.BCEWithLogitsLoss()
+        self.position_loss_fn = torch.nn.CrossEntropyLoss()
+        self.coordinate_loss_fn = torch.nn.MSELoss()  # Or L1Loss
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """
         Forward pass of the model.
 
@@ -213,7 +196,9 @@ class SportsTransformerLitModel(LightningModule):
             x = torch.stack(x)
         return self.model(x)
 
-    def training_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
+    def training_step(
+        self, batch: tuple[Tensor, Tensor, Tensor], batch_idx: int
+    ) -> Tensor:
         """
         Perform a single training step.
 
@@ -225,8 +210,28 @@ class SportsTransformerLitModel(LightningModule):
             Tensor: Computed loss for the batch.
         """
         x, y = batch
-        y_hat = self.model(x)
-        loss = self.loss_fn(y_hat, y)
+        position_target = y[:, 0].long()  # Extract position (batch_size,)
+        coordinate_target = y[:, 1:]  # Extract coordinates (batch_size, 2)
+        position_logits, coordinates = self.model(x)
+        position_loss = self.position_loss_fn(position_logits, position_target)
+        coordinate_loss = self.coordinate_loss_fn(coordinates, coordinate_target)
+        loss = position_loss + coordinate_loss
+        self.log(
+            "train_position_loss",
+            position_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+        self.log(
+            "train_coordinate_loss",
+            coordinate_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
         self.log(
             "train_loss",
             loss,
@@ -237,7 +242,9 @@ class SportsTransformerLitModel(LightningModule):
         )
         return loss
 
-    def validation_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
+    def validation_step(
+        self, batch: tuple[Tensor, Tensor, Tensor], batch_idx: int
+    ) -> Tensor:
         """
         Validation step for the model.
 
@@ -249,8 +256,28 @@ class SportsTransformerLitModel(LightningModule):
             Tensor: Computed loss.
         """
         x, y = batch
-        y_hat = self.model(x)
-        loss = self.loss_fn(y_hat, y)
+        position_target = y[:, 0].long()  # Extract position (batch_size,)
+        coordinate_target = y[:, 1:]  # Extract coordinates (batch_size, 2)
+        position_logits, coordinates = self.model(x)
+        position_loss = self.position_loss_fn(position_logits, position_target)
+        coordinate_loss = self.coordinate_loss_fn(coordinates, coordinate_target)
+        loss = position_loss + coordinate_loss
+        self.log(
+            "val_position_loss",
+            position_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+        self.log(
+            "val_coordinate_loss",
+            coordinate_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
         self.log(
             "val_loss",
             loss,
@@ -262,8 +289,11 @@ class SportsTransformerLitModel(LightningModule):
         return loss
 
     def predict_step(
-        self, batch: tuple[Tensor, Tensor], batch_idx: int, dataloader_idx: int = 0
-    ) -> Tensor:
+        self,
+        batch: tuple[Tensor, Tensor, Tensor],
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> tuple[Tensor, Tensor]:
         """
         Prediction step for the model.
 
@@ -275,11 +305,11 @@ class SportsTransformerLitModel(LightningModule):
         Returns:
             Tensor: Predicted output tensor.
         """
-        x, _ = batch
+        x, _ = batch  # We don't need targets for prediction
         if isinstance(x, list):
             x = torch.stack(x)
-        y_hat = self.model(x)
-        return y_hat
+        position_logits, coordinates = self.model(x)
+        return position_logits, coordinates
 
     def configure_optimizers(self) -> AdamW:
         """
