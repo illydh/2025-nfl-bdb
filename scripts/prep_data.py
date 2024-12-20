@@ -186,7 +186,7 @@ def get_masked_players(tracking_df):
         tuple: A tuple containing the filtered tracking DataFrame and the masked players DataFrame.
     """
     masked_players_df = tracking_df.filter(pl.col("isDefense") == 1)
-    rel_tracking_df = pl.DataFrame
+    rel_tracking_df = []
 
     unique_plays = tracking_df.select(["gameId", "playId"]).unique().rows()
     len_plays, cnt = len(unique_plays), 0
@@ -214,9 +214,8 @@ def get_masked_players(tracking_df):
                     & (pl.col("displayName") == selected_player)
                 )
             )
-            rel_tracking_df = pl.concat(
-                [rel_tracking_df, filtered_tracking_df], how="vertical"
-            )
+            rel_tracking_df.append(filtered_tracking_df)
+
         percent_masked = cnt / len_plays * 100
         if percent_masked % 10 == 0:
             print(f"Masking {percent_masked}% complete")  #   Log %age masked
@@ -224,7 +223,7 @@ def get_masked_players(tracking_df):
     print(
         f"rel_tracking_df rows: {len(rel_tracking_df)}\nmasked_players_df rows: {masked_players_df}"
     )
-    return rel_tracking_df, masked_players_df
+    return pl.concat(rel_tracking_df, how="vertical"), masked_players_df
 
 
 def split_train_test_val(
