@@ -20,20 +20,8 @@ from pytorch_lightning import LightningModule
 torch.set_float32_matmul_precision("medium")
 
 
-class SportsTransformer(nn.Module):
-    """
-    Transformer model architecture for processing sports tracking data.
-
-    This model leverages self-attention mechanisms to process player tracking data, capturing
-    the spatial and temporal relationships between players on the field.
-
-    Attributes:
-        feature_len (int): Number of input features per player.
-        model_dim (int): Dimension of the model's internal representations.
-        num_layers (int): Number of transformer encoder layers.
-        dropout (float): Dropout rate for regularization.
-        hyperparams (dict): Dictionary storing hyperparameters of the model.
-    """
+class GhostFormer(nn.Module):
+    """Transformer model for predicting masked player position and coordinates."""
 
     def __init__(
         self,
@@ -44,15 +32,6 @@ class SportsTransformer(nn.Module):
         dropout: float = 0.3,
         num_positions: int = 19,  # Number of possible positions
     ):
-        """
-        Initialize the SportsTransformer.
-
-        Args:
-            feature_len (int): Number of input features per player.
-            model_dim (int): Dimension of the model's internal representations.
-            num_layers (int): Number of transformer encoder layers.
-            dropout (float): Dropout rate for regularization.
-        """
         super().__init__()
         dim_feedforward = model_dim * 4
         num_heads = min(16, max(2, 2 * round(model_dim / 64)))
@@ -101,15 +80,6 @@ class SportsTransformer(nn.Module):
         )
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
-        """
-        Forward pass of the SportsTransformer.
-
-        Args:
-            x (Tensor): Input tensor of shape [batch_size, num_players, feature_len].
-
-        Returns:
-            Tensor: Predicted output of shape [batch_size, 22].
-        """
         B, P, F = x.size()
 
         x = self.feature_norm_layer(x.permute(0, 2, 1)).permute(0, 2, 1)
@@ -123,21 +93,7 @@ class SportsTransformer(nn.Module):
         return position_logits, coordinates
 
 
-class SportsTransformerLitModel(LightningModule):
-    """
-    Lightning module for training and evaluating models.
-
-    This class wraps the SportsTransformer for training, validation, and testing
-    using PyTorch Lightning, providing a structured training loop, optimization, and logging.
-
-    Attributes:
-        feature_len (int): Number of input features per player.
-        batch_size (int): Batch size for training and evaluation.
-        model (SportsTransformer): The transformer-based model.
-        learning_rate (float): Learning rate for the optimizer.
-        loss_fn (nn.Module): Loss function used for training.
-    """
-
+class GhostFormerLitModel(LightningModule):
     def __init__(
         self,
         feature_len: int,
@@ -149,21 +105,10 @@ class SportsTransformerLitModel(LightningModule):
         learning_rate: float = 1e-3,
         num_positions: int = 19,
     ):
-        """
-        Initialize the SportsTransformerLitModel.
-
-        Args:
-            feature_len (int): Number of input features.
-            batch_size (int): Batch size for training and evaluation.
-            model_dim (int): Dimension of the model's internal representations.
-            num_layers (int): Number of layers in the model.
-            dropout (float): Dropout rate for regularization.
-            learning_rate (float): Learning rate for the optimizer.
-        """
         super().__init__()
         self.feature_len = feature_len
         self.num_positions = num_positions
-        self.model = SportsTransformer(
+        self.model = GhostFormer(
             feature_len=self.feature_len,
             model_dim=model_dim,
             num_layers=num_layers,
@@ -183,15 +128,6 @@ class SportsTransformerLitModel(LightningModule):
         self.coordinate_loss_fn = torch.nn.MSELoss()  # Or L1Loss
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
-        """
-        Forward pass of the model.
-
-        Args:
-            x (Tensor): Input tensor.
-
-        Returns:
-            Tensor: Output tensor.
-        """
         if isinstance(x, list):
             x = torch.stack(x)
         return self.model(x)
@@ -199,23 +135,21 @@ class SportsTransformerLitModel(LightningModule):
     def training_step(
         self, batch: tuple[Tensor, Tensor, Tensor], batch_idx: int
     ) -> Tensor:
-        """
-        Perform a single training step.
-
-        Args:
-            batch (tuple[Tensor, Tensor]): Batch of input features and target locations.
-            batch_idx (int): Index of the current batch.
-
-        Returns:
-            Tensor: Computed loss for the batch.
-        """
         x, y = batch
         position_target = y[:, 0].long()  # Extract position (batch_size,)
         coordinate_target = y[:, 1:]  # Extract coordinates (batch_size, 2)
         position_logits, coordinates = self.model(x)
         position_loss = self.position_loss_fn(position_logits, position_target)
         coordinate_loss = self.coordinate_loss_fn(coordinates, coordinate_target)
-        loss = position_loss + coordinate_loss
+        # Scaling factors (adjust these based on your data and initial experiments)
+        position_scale = 1.0  # You might not need to scale cross entropy as much
+        coordinate_scale = (
+            0.01  # Example if your MSE is much smaller. Adjust as needed.
+        )
+        scaled_position_loss = position_loss * position_scale
+        scaled_coordinate_loss = coordinate_loss * coordinate_scale
+
+        loss = scaled_position_loss + scaled_coordinate_loss
         self.log(
             "train_position_loss",
             position_loss,
@@ -245,23 +179,21 @@ class SportsTransformerLitModel(LightningModule):
     def validation_step(
         self, batch: tuple[Tensor, Tensor, Tensor], batch_idx: int
     ) -> Tensor:
-        """
-        Validation step for the model.
-
-        Args:
-            batch (tuple[Tensor, Tensor]): Batch of input and target tensors.
-            batch_idx (int): Index of the current batch.
-
-        Returns:
-            Tensor: Computed loss.
-        """
         x, y = batch
         position_target = y[:, 0].long()  # Extract position (batch_size,)
         coordinate_target = y[:, 1:]  # Extract coordinates (batch_size, 2)
         position_logits, coordinates = self.model(x)
         position_loss = self.position_loss_fn(position_logits, position_target)
         coordinate_loss = self.coordinate_loss_fn(coordinates, coordinate_target)
-        loss = position_loss + coordinate_loss
+        # Scaling factors (adjust these based on your data and initial experiments)
+        position_scale = 1.0  # You might not need to scale cross entropy as much
+        coordinate_scale = (
+            0.01  # Example if your MSE is much smaller. Adjust as needed.
+        )
+        scaled_position_loss = position_loss * position_scale
+        scaled_coordinate_loss = coordinate_loss * coordinate_scale
+
+        loss = scaled_position_loss + scaled_coordinate_loss
         self.log(
             "val_position_loss",
             position_loss,
@@ -294,17 +226,6 @@ class SportsTransformerLitModel(LightningModule):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> tuple[Tensor, Tensor]:
-        """
-        Prediction step for the model.
-
-        Args:
-            batch (tuple[Tensor, Tensor]): Batch of input and target tensors.
-            batch_idx (int): Index of the current batch.
-            dataloader_idx (int): Index of the dataloader.
-
-        Returns:
-            Tensor: Predicted output tensor.
-        """
         x, _ = batch  # We don't need targets for prediction
         if isinstance(x, list):
             x = torch.stack(x)
@@ -312,10 +233,4 @@ class SportsTransformerLitModel(LightningModule):
         return position_logits, coordinates
 
     def configure_optimizers(self) -> AdamW:
-        """
-        Configure the optimizer for training.
-
-        Returns:
-            AdamW: Configured optimizer.
-        """
         return AdamW(self.parameters(), lr=self.learning_rate)
