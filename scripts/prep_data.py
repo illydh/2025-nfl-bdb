@@ -88,7 +88,9 @@ def get_tracking_df() -> pl.DataFrame:
     return pl.read_csv(
         INPUT_DATA_DIR / "tracking_week_1.csv",
         null_values=["NA", "nan", "N/A", "NaN", ""],
-    ).filter(pl.col("displayName") != "football")
+    ).filter(
+        (pl.col("displayName") != "football") & (pl.col("frameType") == "BEFORE_SNAP")
+    )
 
 
 def add_features_to_tracking_df(
@@ -177,6 +179,7 @@ def augment_data(tracking_df):
     """
     # Assuming 'tracking_df' is your Polars DataFrame
     # and it has columns 'gameId', 'playId', 'x', 'y'
+    tgt_df = []
     for game_id, play_id in tracking_df.select(["gameId", "playId"]).unique().rows():
         defensive_players = tracking_df.filter(
             (pl.col("gameId") == game_id)
@@ -186,6 +189,7 @@ def augment_data(tracking_df):
         unique_names = defensive_players["displayName"].unique().to_list()
 
         rel_tracking_df = []
+        player_identifier = 1  # Initialize player identifier
 
         for player_name in unique_names:
             # Filter out the selected player from tracking_df
@@ -195,41 +199,59 @@ def augment_data(tracking_df):
             #         & (pl.col("displayName") != player_name)
             # )
             filtered_df = tracking_df.filter(
-                (pl.col("gameId") == game_id) & (pl.col("playId") == play_id)
+                (pl.col("gameId") == game_id)
+                & (pl.col("playId") == play_id)
+                & (pl.col("displayName") != player_name)
             ).with_columns(
-                pl.when(pl.col("displayName") == player_name)
-                .then(pl.lit("MASKED"))
-                .otherwise(pl.col("position"))
-                .alias("position"),
-                pl.when(pl.col("displayName") == player_name)
-                .then(pl.lit(-1))
-                .otherwise(pl.col("x"))
-                .alias("x"),
-                pl.when(pl.col("displayName") == player_name)
-                .then(pl.lit(-1))
-                .otherwise(pl.col("y"))
-                .alias("y"),
+                pl.lit(player_identifier).alias("maskedId")  # Add player identifier
             )
 
-            # Assert that the masked player's position is now "MASKED"
-            masked_player_df = filtered_df.filter(pl.col("displayName") == player_name)
-            assert masked_player_df["position"].unique().to_list() == [
-                "MASKED"
-            ], f"Masked player {player_name} position is not 'MASKED'"
+            masked_player_df = tracking_df.filter(
+                (pl.col("gameId") == game_id)
+                & (pl.col("playId") == play_id)
+                & (pl.col("displayName") == player_name)
+            ).with_columns(
+                pl.lit(player_identifier).alias("maskedId")  # Add player identifier
+            )
+
+            # Assert that player_name is not in the filtered dataframe
+            assert (
+                player_name not in filtered_df["displayName"].to_list()
+            ), f"Player {player_name} still present in filtered data for game {game_id}, play {play_id}"
+            assert (
+                player_name in masked_player_df["displayName"].to_list()
+            ), f"Player {player_name} not present in masked data for game {game_id}, play {play_id}"
+
             rel_tracking_df.append(filtered_df)
+            tgt_df.append(masked_player_df)
+            player_identifier += 1
 
         # Concatenate all DataFrames in the list
         rel_tracking_df = pl.concat(rel_tracking_df)
 
         # Select only the specified columns
         rel_tracking_df = rel_tracking_df.select(
-            ["gameId", "playId", "frameId", "displayName", "position", "x", "y"]
+            [
+                "gameId",
+                "playId",
+                "frameId",
+                "maskedId",
+                "nflId",
+                "displayName",
+                "position",
+                "x",
+                "y",
+            ]
         )
 
         # Save the DataFrame to the specified directory
         rel_tracking_df.write_parquet(
             TRACKING_OUT_DIR / f"game_{game_id}_play_{play_id}.parquet"
         )
+
+    return pl.concat(tgt_df).select(
+        ["gameId", "playId", "frameId", "maskedId", "displayName", "position", "x", "y"]
+    )
 
 
 def get_target_variable(tracking_df):
@@ -243,7 +265,7 @@ def get_target_variable(tracking_df):
         pl.DataFrame: Target variable
     """
     return tracking_df.filter(pl.col("isDefense") == 1).select(
-        ["gameId", "playId", "frameId", "displayName", "position", "x", "y"]
+        ["gameId", "playId", "frameId", "nflId", "displayName", "position", "x", "y"]
     )
 
 
@@ -355,14 +377,10 @@ def main():
     print("tracking_df rows:", len(tracking_df))
 
     print(f"Augment tracking data")
-    augment_data(tracking_df)
-
-    print("Generate target - maskedPlayers")
-    maskedPlayers_df = get_target_variable(tracking_df)
-    maskedPlayers_df
+    tgt_df = augment_data(tracking_df)
 
     print("Split train/test/val")
-    split_dfs = split_train_test_val(maskedPlayers_df)
+    split_dfs = split_train_test_val(tgt_df)
 
     for key, df in split_dfs.items():
         sort_keys = ["gameId", "playId", "frameId"]
