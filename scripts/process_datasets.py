@@ -26,30 +26,29 @@ import polars as pl
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-PREPPED_DATA_DIR = Path("./drive/My Drive/bdb-2025/split_prepped_data/")
-DATASET_DIR = Path("./drive/My Drive/bdb-2025/split_prepped_data/working/datasets/")
+PREPPED_DATA_DIR = Path("./drive/My Drive/bdb-2025/prepped_data/split")
+DATASET_DIR = Path("./drive/My Drive/bdb-2025/working/datasets/")
 
 # Enumerate player positions
 POSITIONS_ENUM = {
-    "T": 0,
+    "C": 0,
     "CB": 1,
-    "G": 2,
-    "SS": 3,
-    "FS": 4,
-    "DB": 5,
-    "MLB": 6,
-    "LB": 7,
-    "OLB": 8,
-    "DT": 9,
-    "ILB": 10,
-    "NT": 11,
-    "TE": 12,
-    "WR": 13,
-    "QB": 14,
-    "RB": 15,
-    "DE": 16,
-    "FB": 17,
-    "C": 18,
+    "DE": 2,
+    "DT": 3,
+    "FB": 4,
+    "FS": 5,
+    "G": 6,
+    "ILB": 7,
+    "LB": 8,
+    "MLB": 9,
+    "NT": 10,
+    "OLB": 11,
+    "QB": 12,
+    "RB": 13,
+    "SS": 14,
+    "T": 15,
+    "TE": 16,
+    "WR": 17,
 }
 
 
@@ -90,18 +89,20 @@ class BDB2025_Dataset(Dataset):
 
         self.model_type = model_type
         self.keys = list(
-            feature_df.select(["gameId", "playId", "frameId"]).unique().rows()
+            feature_df.select(["gameId", "playId", "frameId", "maskedId"])
+            .unique()
+            .rows()
         )
 
         # Convert to pandas form with index for quick row retrieval
         self.feature_df_partition = (
             feature_df.to_pandas(use_pyarrow_extension_array=True)
-            .set_index(["gameId", "playId", "frameId", "nflId"])
+            .set_index(["gameId", "playId", "frameId", "maskedId", "nflId"])
             .sort_index()
         )
         self.tgt_df_partition = (
             tgt_df.to_pandas(use_pyarrow_extension_array=True)
-            .set_index(["gameId", "playId", "frameId"])
+            .set_index(["gameId", "playId", "frameId", "maskedId"])
             .sort_index()
         )
 
