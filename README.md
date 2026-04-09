@@ -1,44 +1,57 @@
-# Using Transformers to Predict Motion of Masked Player 
+# GhostFormer: Probabilistic Spatiotemporal Modeling of NFL Player Dynamics
 
-## Overview
+## Abstract
+This research project introduces **GhostFormer**, a Transformer-based architecture designed for the reconstruction and trajectory prediction of masked defensive agents within high-dimensional sports tracking environments. Leveraging the 2025 NFL Big Data Bowl dataset, we implement a masked language modeling (MLM) approach adapted for continuous spatial sequences. The model treats the set of 22 players as a sequence of spatiotemporal tokens, predicting the position and motion variance of a "ghosted" player leading up to the snap event.
 
-This project applies transformer models to predict the motion of a masked defensive player in NFL player tracking data. It uses sequential data preprocessing, masking techniques, and deep learning to understand player dynamics and interactions.
+## Key Research Contributions
+- **Adaptive Spatiotemporal Attention**: Implementation of multi-head self-attention mechanisms to capture complex inter-player dependencies and defensive alignments.
+- **Probabilistic Aleatoric Uncertainty**: Unlike deterministic regression models, GhostFormer utilizes a Gaussian Negative Log Likelihood (NLL) objective to estimate the model's confidence through predicted log-variance parameters.
+- **Relative Positional Normalization**: Implementation of a coordinate transformation system that normalizes player positions relative to the dynamic "Line of Scrimmage" midpoint, ensuring model invariance to absolute yardage.
+- **Dynamic Masked Augmentation**: A 11-fold data augmentation strategy that dynamically re-samples and masks individual defensive players during the training phase to maximize sample density and generalize spatial relationships.
 
-## Goals
+## Methodology
 
-- Predict the x and y positions of a masked defensive player.
-- Analyze player interactions and dependencies using transformer attention mechanisms.
+### 1. Spatial Preprocessing & Normalization
+Traditional absolute coordinates are transformed into a relative coordinate system. The origin $(0,0)$ is estimated as the geometric midpoint between the offensive and defensive clusters for each specific frame. This renders the model robust against varied field positions and directional biases.
 
-## Approach
+### 2. The GhostFormer Architecture
+The core model is a Transformer Encoder optimized for spatial regression. 
+- **Input Encoding**: Concatenation of $(x, y, \text{mask\_flag})$ with Categorical Position Embeddings (e.g., CB, FS, MLB).
+- **Encoder Layers**: Multi-layer self-attention blocks with Layer Normalization and GELU activations.
+- **Prediction Head**: A multi-output MLP that regresses the bivariate mean ($\mu_x, \mu_y$) and log-variance ($\log \sigma_x^2, \log \sigma_y^2$).
 
-1. Preprocess the data:
-  - Normalize player positions relative to play direction.
-  - Mask the target defensive player's motion data.
-  - Create sequences of player movements over time.
-2. Train a transformer model:
-  - Inputs: Player features as sequences with positional encodings.
-  - Outputs: Predicted x, y coordinates of the masked player.
-3. Evaluate performance:
-  - Metrics: Mean Squared Error (MSE) for position prediction.
+### 3. Objective Function
+We optimize using the **Gaussian Negative Log Likelihood (NLL)**:
+$$\mathcal{L}(\theta) = \frac{1}{2} \sum \left( \log \sigma^2 + \frac{(y - \mu)^2}{\sigma^2} \right)$$
+This approach allows the model to learn to increase its predicted variance in scenarios of high complexity or ambiguity (e.g., pre-snap motion), providing a calibrated measure of model confidence.
 
-## How to Run
-1. **Download the dataset** from [Kaggle NFL Big Data Bowl](https://www.kaggle.com/competitions/nfl-big-data-bowl-2025/data).
-    The compressed dataset can be downloaded directly from terminal using the following commands:
-    ```
-    pip install kaggle
-    mkdir ~/.kaggle
-    cp kaggle.json ~/.kaggle/
-    chmod 600 ~/.kaggle/kaggle.json
-    kaggle competitions download nfl-big-data-bowl-2025
-    unzip path/to/file/nfl-big-data-bowl-2025.zip'
-    ```
-    *Note: `kaggle.json` is a API token created from Kaggle creator accounts and is necessary to access Kaggle commands. Directions to downloading one can be found [here](https://www.kaggle.com/docs/api).*
-2. Place the dataset and the script files into the same directory that this repository is cloned in.
-3. Preprocess the data and train the model.
-4. Evaluate the model.
+## Repository Structure
+- `preprocess.py`: High-performance data ingestion utilizing Polars for relative coordinate transformation.
+- `dataset.py`: Implementation of the dynamic defensive masking and dataset iteration logic.
+- `models.py`: Definition of the Git-Former architecture and LightningModule wrapper.
+- `train.py`: Distributed training pipeline with experiment tracking via TensorBoard.
+- `evaluate.py`: Statistical evaluation on the Week 9 hold-out set, analyzing MSE and Gaussian NLL metrics.
+- `visualize.py`: Synthesis of spatiotemporal trajectories with overlayed confidence ellipses.
+- `BDB_Pipeline_Colab.ipynb`: Consolidated research environment for cloud-based replication.
 
+## Experimental Setup & Usage
+1. **Prerequisites**: Ensure the `data/` directory contains the NFL BDB 2022 CSV files.
+2. **Installation**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. **Pipeline Execution**:
+   ```bash
+   python preprocess.py  # Generate serialized tensors
+   python train.py       # Execute training routine
+   python evaluate.py    # Validate against Week 9
+   python visualize.py   # Generate trajectory animation
+   ```
+
+## Future Work
+- **Temporal Self-Attention**: Extending the spatial transformer to a 3D-Attention mechanism (Spatial + Temporal) to capture time-series evolution more effectively.
+- **Grid-based Discrete Tokenization**: Reframing spatial regression as a classification task via field discretization (Spatial Tokenization) to leverage cross-entropy objectives.
+- **Offense-Defense Interaction Analysis**: Applying attention-map visualization to quantify the "influence" of specific offensive players on defensive positioning.
 
 ## Acknowledgments
-
-1. NFL Big Data Bowl for providing the dataset.
-2. Transformer model architecture inspired by the original paper by Vaswani et al., *Attention is All You Need*.
+Dataset provided by the **NFL Big Data Bowl 2025**. Research inspired by Transformer-based sequence modeling advancements in *Attention is All You Need* (Vaswani et al.).

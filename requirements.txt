@@ -1,0 +1,8 @@
+polars
+torch
+numpy
+tensorboardX
+tensorboard
+pytorch-lightning
+tqdm
+matplotlib
