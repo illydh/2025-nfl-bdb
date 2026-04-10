@@ -60,8 +60,8 @@ def preprocess_weeks(weeks, split_name):
         ])
         
         # We need frames to have EXACTLY 22 players
-        counts = df.group_by(["gameId", "playId", "frameId"]).len()
-        valid_frames = counts.filter(pl.col("len") == 22).select(["gameId", "playId", "frameId"])
+        counts = df.group_by(["gameId", "playId", "frameId"]).agg(pl.col("nflId").n_unique().alias("unique_len"))
+        valid_frames = counts.filter(pl.col("unique_len") == 22).select(["gameId", "playId", "frameId"])
         df = df.join(valid_frames, on=["gameId", "playId", "frameId"], how="inner")
         
         # Group to lists

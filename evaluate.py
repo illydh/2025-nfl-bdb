@@ -1,69 +1,57 @@
 import torch
-import numpy as np
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from dataset import MaskedPlayerDataset
 from models import GhostFormerLitModel
+import glob
 
 def evaluate():
     print("Loading test dataset (Week 9)...")
     test_dataset = MaskedPlayerDataset("data/test_frames.pt")
-    test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=2)
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=2)
 
-    # Assuming we have a saved checkpoint from training. 
-    # If not, we will just use an untrained model to demonstrate the pipeline.
-    import glob
     ckpt_files = glob.glob("checkpoints/*.ckpt")
     if ckpt_files:
         print(f"Loading model from checkpoint {ckpt_files[0]}")
         model = GhostFormerLitModel.load_from_checkpoint(ckpt_files[0])
     else:
-        print("No checkpoint found. Evaluating with untrained model...")
         model = GhostFormerLitModel()
         
     model.eval()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
     
     total_mse = 0
-    total_mae = 0
-    total_nll = 0
     count = 0
     
-    print("Evaluating...")
+    print("Evaluating Spatiotemporal Metrics...")
     with torch.no_grad():
         for batch in test_loader:
-            numeric = batch["numeric"]
-            pos_ids = batch["pos_ids"]
-            mask_idx = batch["mask_idx"]
-            target = batch["target"]
+            numeric, pos_ids, mask_idx = batch["numeric"].to(device), batch["pos_ids"].to(device), batch["mask_idx"].to(device)
+            target, valid_mask = batch["target"].to(device), batch["valid_mask"].to(device)
             
-            pred_mean, pred_logvar = model(numeric, pos_ids, mask_idx)
+            logits_x, logits_y = model(numeric, pos_ids, mask_idx, valid_mask)
             
-            mse = torch.nn.functional.mse_loss(pred_mean, target, reduction='sum').item()
-            mae = torch.nn.functional.l1_loss(pred_mean, target, reduction='sum').item()
+            # Predict coordinates
+            pred_x = logits_x.argmax(dim=-1).float() - 60
+            pred_y = logits_y.argmax(dim=-1).float() - 30
+            pred_mean = torch.stack([pred_x, pred_y], dim=-1) # (B, T, 2)
             
-            # NLL metric
-            var = torch.exp(pred_logvar) + 1e-6
-            nll = 0.5 * (torch.log(var) + ((target - pred_mean) ** 2) / var).sum().item()
+            true_x = target[:, :, 0].float() - 60
+            true_y = target[:, :, 1].float() - 30
+            target_mean = torch.stack([true_x, true_y], dim=-1)
+            
+            # Mask out padding in MSE
+            diff_sq = ((pred_mean - target_mean) ** 2)
+            mse = (diff_sq.sum(dim=-1) * valid_mask).sum().item()
             
             total_mse += mse
-            total_mae += mae
-            total_nll += nll
-            count += numeric.size(0) * 2 # 2 coordinates
+            count += valid_mask.sum().item() * 2 # 2 coordinates per valid frame
             
     print("-"*40)
     print("EVALUATION RESULTS (WEEK 9)")
     print(f"Mean Squared Error (MSE): {total_mse/count:.4f}")
-    print(f"Mean Absolute Error (MAE): {total_mae/count:.4f}")
-    print(f"Gaussian NLL: {total_nll/(count/2):.4f}")
     print("-"*40)
-    print("""
-    Future Improvements for Spatial/Temporal Classification:
-    Instead of continuous regression, the playing field can be discretized into a grid (e.g. 1x1 yard cells).
-    This reframes the prediction into a spatial classification problem, which is naturally suited
-    for cross-entropy loss and standard autoregressive LM objective formatting.
-    Temporal relationships can be captured by adding Temporal self-attention over the sequence of frames
-    instead of processing frames independently.
-    """)
 
 if __name__ == "__main__":
     evaluate()
