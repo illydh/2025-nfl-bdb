@@ -2,7 +2,9 @@
 
 A deep learning project leveraging spatiotemporal Transformers to reconstruct player movements in NFL tracking data. Using a masked-player approach, the model predicts the trajectory of a specific player during the pre-snap window based on the physical dynamics of the other 21 players on the field.
 
-![Trajectory Visualization](outputs/visualization.mp4)
+https://github.com/user-attachments/assets/2e796baf-956c-4c6c-a811-34b34096b1e7
+
+
 
 ## Project Goals
 - **Motion Reconstruction**: Predict where a specific defensive player *should* be given the alignment and motion of the rest of the field.
